@@ -243,8 +243,8 @@ bool HandMocapReceiver::updateHands(HandState& leftHand, HandState& rightHand)
         if (name == "RightHand") {
             float px = 0.0f, py = 0.0f, pz = 0.0f;
             float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
-            jointIf_->GetJointGlobalTranslation(&px, &py, &pz, jointHandle);
-            jointIf_->GetJointGlobalRotation(&qx, &qy, &qz, &qw, jointHandle);
+            jointIf_->GetJointLocalPosition(&px, &py, &pz, jointHandle);
+            jointIf_->GetJointLocalRotation(&qx, &qy, &qz, &qw, jointHandle);
 
             rightHand.wristPos[0] = px;
             rightHand.wristPos[1] = py;
@@ -258,8 +258,8 @@ bool HandMocapReceiver::updateHands(HandState& leftHand, HandState& rightHand)
         } else if (name == "LeftHand") {
             float px = 0.0f, py = 0.0f, pz = 0.0f;
             float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
-            jointIf_->GetJointGlobalTranslation(&px, &py, &pz, jointHandle);
-            jointIf_->GetJointGlobalRotation(&qx, &qy, &qz, &qw, jointHandle);
+            jointIf_->GetJointLocalPosition(&px, &py, &pz, jointHandle);
+            jointIf_->GetJointLocalRotation(&qx, &qy, &qz, &qw, jointHandle);
 
             leftHand.wristPos[0] = px;
             leftHand.wristPos[1] = py;
@@ -276,7 +276,7 @@ bool HandMocapReceiver::updateHands(HandState& leftHand, HandState& rightHand)
             float ex = 0.0f, ey = 0.0f, ez = 0.0f;
             float px = 0.0f, py = 0.0f, pz = 0.0f;
             jointIf_->GetJointLocalRotationByEuler(&ex, &ey, &ez, jointHandle);
-            jointIf_->GetJointGlobalTranslation(&px, &py, &pz, jointHandle);
+            jointIf_->GetJointLocalPosition(&px, &py, &pz, jointHandle);
             JointAngle ja;
             ja.name = name;
             ja.ex = ex;
@@ -290,7 +290,7 @@ bool HandMocapReceiver::updateHands(HandState& leftHand, HandState& rightHand)
             float ex = 0.0f, ey = 0.0f, ez = 0.0f;
             float px = 0.0f, py = 0.0f, pz = 0.0f;
             jointIf_->GetJointLocalRotationByEuler(&ex, &ey, &ez, jointHandle);
-            jointIf_->GetJointGlobalTranslation(&px, &py, &pz, jointHandle);
+            jointIf_->GetJointLocalPosition(&px, &py, &pz, jointHandle);
             JointAngle ja;
             ja.name = name;
             ja.ex = ex;

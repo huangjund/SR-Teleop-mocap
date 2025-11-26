@@ -17,8 +17,8 @@ struct JointAngle {
 struct HandState {
     bool valid = false;
     std::string side;       // "left" or "right"
-    float wristPos[3] = {0.0f, 0.0f, 0.0f};      // global position (x,y,z)
-    float wristQuat[4] = {0.0f, 0.0f, 0.0f, 1.0f};  // global orientation (qx,qy,qz,qw)
+    float wristPos[3] = {0.0f, 0.0f, 0.0f};      // local position (x,y,z)
+    float wristQuat[4] = {0.0f, 0.0f, 0.0f, 1.0f};  // local orientation (qx,qy,qz,qw)
     std::vector<JointAngle> fingers;
 };
 
