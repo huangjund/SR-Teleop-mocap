@@ -2,7 +2,7 @@
 //
 // Simple MocapApi BVH subscriber.
 // - Connects to Axis Studio BVH broadcast at 127.0.0.1:7012
-// - Every 2 seconds (0.5 Hz), prints hand joint Euler angles and wrist 6D pose
+// - Every 2 seconds (0.5 Hz), prints full BVH joint data (local + world pose)
 //
 // Build:
 //   - Include path: <repo_root>/include
@@ -21,60 +21,60 @@
 
 using namespace MocapApi;
 
-struct WristPose
+struct JointFullData
 {
     std::string jointName;
-    float px = 0.0f;
-    float py = 0.0f;
-    float pz = 0.0f;
-    float qx = 0.0f;
-    float qy = 0.0f;
-    float qz = 0.0f;
-    float qw = 1.0f;
+    EMCPJointTag tag = JointTag_Invalid;
+    float localPx    = 0.0f;
+    float localPy    = 0.0f;
+    float localPz    = 0.0f;
+    float localRx    = 0.0f;
+    float localRy    = 0.0f;
+    float localRz    = 0.0f;
+    float localQx    = 0.0f;
+    float localQy    = 0.0f;
+    float localQz    = 0.0f;
+    float localQw    = 1.0f;
+    float worldPx    = 0.0f;
+    float worldPy    = 0.0f;
+    float worldPz    = 0.0f;
+    float worldQx    = 0.0f;
+    float worldQy    = 0.0f;
+    float worldQz    = 0.0f;
+    float worldQw    = 1.0f;
 };
 
-std::optional<WristPose> GetWristPose(IMCPJoint*     jointIf,
-                                      IMCPBodyPart* bodyPartIf,
-                                      MCPJointHandle_t jointHandle)
+std::optional<JointFullData> GetJointFullData(IMCPJoint*      jointIf,
+                                              IMCPBodyPart*   bodyPartIf,
+                                              MCPJointHandle_t jointHandle)
 {
     if (!jointIf || !bodyPartIf || !jointHandle) return std::nullopt;
 
-    WristPose pose;
+    JointFullData data;
+
+    jointIf->GetJointTag(&data.tag, jointHandle);
 
     const char* jointName = nullptr;
     if (jointIf->GetJointName(&jointName, jointHandle) == Error_None && jointName) {
-        pose.jointName = jointName;
+        data.jointName = jointName;
     } else {
-        pose.jointName = "<unknown_wrist>";
+        data.jointName = "<unknown_joint>";
     }
+
+    jointIf->GetJointLocalPosition(&data.localPx, &data.localPy, &data.localPz, jointHandle);
+    jointIf->GetJointLocalRotationByEuler(&data.localRx, &data.localRy, &data.localRz, jointHandle);
+    jointIf->GetJointLocalRotation(&data.localQx, &data.localQy, &data.localQz, &data.localQw,
+                                   jointHandle);
 
     MCPBodyPartHandle_t bodyPartHandle = 0;
-    if (jointIf->GetJointBodyPart(&bodyPartHandle, jointHandle) != Error_None ||
-        bodyPartHandle == 0) {
-        return std::nullopt;
+    if (jointIf->GetJointBodyPart(&bodyPartHandle, jointHandle) == Error_None &&
+        bodyPartHandle != 0) {
+        bodyPartIf->GetJointPosition(&data.worldPx, &data.worldPy, &data.worldPz, bodyPartHandle);
+        bodyPartIf->GetBodyPartPosture(&data.worldQx, &data.worldQy, &data.worldQz, &data.worldQw,
+                                       bodyPartHandle);
     }
 
-    if (bodyPartIf->GetJointPosition(&pose.px, &pose.py, &pose.pz, bodyPartHandle) !=
-        Error_None) {
-        return std::nullopt;
-    }
-
-    if (bodyPartIf->GetBodyPartPosture(&pose.qx, &pose.qy, &pose.qz, &pose.qw,
-                                       bodyPartHandle) != Error_None) {
-        return std::nullopt;
-    }
-
-    return pose;
-}
-
-bool IsRightHandTag(EMCPJointTag tag)
-{
-    return tag >= JointTag_RightHand && tag <= JointTag_RightHandPinky3;
-}
-
-bool IsLeftHandTag(EMCPJointTag tag)
-{
-    return tag >= JointTag_LeftHand && tag <= JointTag_LeftHandPinky3;
+    return data;
 }
 
 int main()
@@ -83,6 +83,23 @@ int main()
     const uint16_t PORT   = 7012;     // BVH broadcast port
 
     std::cout << "MocapApi BVH subscriber starting...\n";
+
+    // Surface how many data categories the API exposes through its event system.
+    const std::vector<std::string> apiDataTypes = {
+        "Avatar motion frames (MCPEvent_AvatarUpdated)",
+        "Rigid body transforms (MCPEvent_RigidBodyUpdated)",
+        "Sensor module telemetry (MCPEvent_SensorModulesUpdated)",
+        "Tracker transforms (MCPEvent_TrackerUpdated)",
+        "Marker positions (MCPEvent_MarkerData)",
+        "PWR data (MCPEvent_PWRData)",
+        "Command replies (MCPEvent_CommandReply)",
+        "Notifications (MCPEvent_Notify)"};
+
+    std::cout << "API exposes " << apiDataTypes.size()
+              << " data categories via events:" << std::endl;
+    for (const auto& type : apiDataTypes) {
+        std::cout << "  - " << type << std::endl;
+    }
 
     EMCPError err = Error_None;
 
@@ -275,63 +292,27 @@ int main()
                             continue;
                         }
 
-                        MCPJointHandle_t leftWrist  = 0;
-                        MCPJointHandle_t rightWrist = 0;
-
-                        std::cout << "-- Hand joint Euler angles --\n";
+                        std::cout << "-- Joint data (BVH broadcast) --\n";
                         for (uint32_t j = 0; j < jointCount; ++j) {
                             MCPJointHandle_t jointHandle = joints[j];
-                            EMCPJointTag tag = JointTag_Invalid;
-                            if (jointIf->GetJointTag(&tag, jointHandle) != Error_None) {
-                                continue;
-                            }
+                            auto data = GetJointFullData(jointIf, bodyPartIf, jointHandle);
+                            if (!data) continue;
 
-                            if (tag == JointTag_LeftHand) {
-                                leftWrist = jointHandle;
-                            } else if (tag == JointTag_RightHand) {
-                                rightWrist = jointHandle;
-                            }
-
-                            if (!IsLeftHandTag(tag) && !IsRightHandTag(tag)) {
-                                continue;
-                            }
-
-                            const char* name = nullptr;
-                            jointIf->GetJointName(&name, jointHandle);
-
-                            float rx = 0.0f, ry = 0.0f, rz = 0.0f;
-                            jointIf->GetJointLocalRotationByEuler(&rx, &ry, &rz, jointHandle);
-
-                            std::cout << "  "
-                                      << (name ? name : "<joint>")
-                                      << " : Euler(" << rx << ", " << ry
-                                      << ", " << rz << ")\n";
-                        }
-
-                        std::cout << "-- Wrist 6D pose (position + quaternion) --\n";
-
-                        auto rightPose = GetWristPose(jointIf, bodyPartIf, rightWrist);
-                        if (rightPose) {
-                            std::cout << "  Right wrist [" << rightPose->jointName
-                                      << "]: Pos(" << rightPose->px << ", "
-                                      << rightPose->py << ", " << rightPose->pz
-                                      << ")  Rot(" << rightPose->qx << ", "
-                                      << rightPose->qy << ", " << rightPose->qz
-                                      << ", " << rightPose->qw << ")\n";
-                        } else {
-                            std::cout << "  Right wrist data unavailable.\n";
-                        }
-
-                        auto leftPose = GetWristPose(jointIf, bodyPartIf, leftWrist);
-                        if (leftPose) {
-                            std::cout << "  Left wrist [" << leftPose->jointName
-                                      << "]: Pos(" << leftPose->px << ", "
-                                      << leftPose->py << ", " << leftPose->pz
-                                      << ")  Rot(" << leftPose->qx << ", "
-                                      << leftPose->qy << ", " << leftPose->qz
-                                      << ", " << leftPose->qw << ")\n";
-                        } else {
-                            std::cout << "  Left wrist data unavailable.\n";
+                            std::cout << "  " << data->jointName
+                                      << " [tag " << static_cast<int>(data->tag) << "]"
+                                      << "\n";
+                            std::cout << "    Local Pos : (" << data->localPx << ", "
+                                      << data->localPy << ", " << data->localPz << ")\n";
+                            std::cout << "    Local Rot : Euler(" << data->localRx << ", "
+                                      << data->localRy << ", " << data->localRz
+                                      << ")  Quaternion(" << data->localQx << ", "
+                                      << data->localQy << ", " << data->localQz
+                                      << ", " << data->localQw << ")\n";
+                            std::cout << "    World Pos : (" << data->worldPx << ", "
+                                      << data->worldPy << ", " << data->worldPz << ")\n";
+                            std::cout << "    World Rot : Quaternion(" << data->worldQx
+                                      << ", " << data->worldQy << ", " << data->worldQz
+                                      << ", " << data->worldQw << ")\n";
                         }
                     }
                 }
