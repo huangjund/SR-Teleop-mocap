@@ -3,6 +3,56 @@
 #include <iostream>
 #include <unordered_map>
 
+namespace {
+bool IsHandJoint(MocapApi::EMCPJointTag tag) {
+    switch (tag) {
+        case MocapApi::JointTag_RightHand:
+        case MocapApi::JointTag_RightHandThumb1:
+        case MocapApi::JointTag_RightHandThumb2:
+        case MocapApi::JointTag_RightHandThumb3:
+        case MocapApi::JointTag_RightInHandIndex:
+        case MocapApi::JointTag_RightHandIndex1:
+        case MocapApi::JointTag_RightHandIndex2:
+        case MocapApi::JointTag_RightHandIndex3:
+        case MocapApi::JointTag_RightInHandMiddle:
+        case MocapApi::JointTag_RightHandMiddle1:
+        case MocapApi::JointTag_RightHandMiddle2:
+        case MocapApi::JointTag_RightHandMiddle3:
+        case MocapApi::JointTag_RightInHandRing:
+        case MocapApi::JointTag_RightHandRing1:
+        case MocapApi::JointTag_RightHandRing2:
+        case MocapApi::JointTag_RightHandRing3:
+        case MocapApi::JointTag_RightInHandPinky:
+        case MocapApi::JointTag_RightHandPinky1:
+        case MocapApi::JointTag_RightHandPinky2:
+        case MocapApi::JointTag_RightHandPinky3:
+        case MocapApi::JointTag_LeftHand:
+        case MocapApi::JointTag_LeftHandThumb1:
+        case MocapApi::JointTag_LeftHandThumb2:
+        case MocapApi::JointTag_LeftHandThumb3:
+        case MocapApi::JointTag_LeftInHandIndex:
+        case MocapApi::JointTag_LeftHandIndex1:
+        case MocapApi::JointTag_LeftHandIndex2:
+        case MocapApi::JointTag_LeftHandIndex3:
+        case MocapApi::JointTag_LeftInHandMiddle:
+        case MocapApi::JointTag_LeftHandMiddle1:
+        case MocapApi::JointTag_LeftHandMiddle2:
+        case MocapApi::JointTag_LeftHandMiddle3:
+        case MocapApi::JointTag_LeftInHandRing:
+        case MocapApi::JointTag_LeftHandRing1:
+        case MocapApi::JointTag_LeftHandRing2:
+        case MocapApi::JointTag_LeftHandRing3:
+        case MocapApi::JointTag_LeftInHandPinky:
+        case MocapApi::JointTag_LeftHandPinky1:
+        case MocapApi::JointTag_LeftHandPinky2:
+        case MocapApi::JointTag_LeftHandPinky3:
+            return true;
+        default:
+            return false;
+    }
+}
+}  // namespace
+
 SkeletonViewer::~SkeletonViewer() {
     if (window_) {
         glfwDestroyWindow(window_);
@@ -70,7 +120,9 @@ void SkeletonViewer::Draw(const std::vector<JointSample>& joints) {
     glBegin(GL_LINES);
     glColor3f(0.1f, 0.9f, 0.6f);
     for (const auto& j : joints) {
+        if (!IsHandJoint(j.tag)) continue;
         if (j.parentTag == MocapApi::JointTag_Invalid) continue;
+        if (!IsHandJoint(j.parentTag)) continue;
         auto it = tagToIndex.find(static_cast<int>(j.parentTag));
         if (it == tagToIndex.end()) continue;
 
