@@ -2,7 +2,7 @@
 //
 // Simple MocapApi BVH subscriber.
 // - Connects to Axis Studio BVH broadcast at 127.0.0.1:7012
-// - Every 1 second, prints all joints' local Euler angles
+// - Every 2 seconds (0.5 Hz), prints full BVH joint data (local + world pose)
 //
 // Build:
 //   - Include path: <repo_root>/include
@@ -13,51 +13,68 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include <thread>
 #include <chrono>
+#include <optional>
+#include <thread>
 
 #include "MocapApi.h"
 
 using namespace MocapApi;
 
-// Helper: print one joint and recurse on children
-void DumpJointTree(IMCPJoint* jointIf,
-                   MCPJointHandle_t jointHandle,
-                   int indentSpaces)
+struct JointFullData
 {
-    if (!jointIf || !jointHandle) return;
+    std::string jointName;
+    EMCPJointTag tag = JointTag_Invalid;
+    float localPx    = 0.0f;
+    float localPy    = 0.0f;
+    float localPz    = 0.0f;
+    float localRx    = 0.0f;
+    float localRy    = 0.0f;
+    float localRz    = 0.0f;
+    float localQx    = 0.0f;
+    float localQy    = 0.0f;
+    float localQz    = 0.0f;
+    float localQw    = 1.0f;
+    float worldPx    = 0.0f;
+    float worldPy    = 0.0f;
+    float worldPz    = 0.0f;
+    float worldQx    = 0.0f;
+    float worldQy    = 0.0f;
+    float worldQz    = 0.0f;
+    float worldQw    = 1.0f;
+};
 
-    EMCPError err = Error_None;
+std::optional<JointFullData> GetJointFullData(IMCPJoint*      jointIf,
+                                              IMCPBodyPart*   bodyPartIf,
+                                              MCPJointHandle_t jointHandle)
+{
+    if (!jointIf || !bodyPartIf || !jointHandle) return std::nullopt;
 
-    // Joint name
+    JointFullData data;
+
+    jointIf->GetJointTag(&data.tag, jointHandle);
+
     const char* jointName = nullptr;
-    err = jointIf->GetJointName(&jointName, jointHandle);
-    if (err != Error_None) {
-        jointName = "<unknown_joint>";
+    if (jointIf->GetJointName(&jointName, jointHandle) == Error_None && jointName) {
+        data.jointName = jointName;
+    } else {
+        data.jointName = "<unknown_joint>";
     }
 
-    // Local Euler rotation
-    float rx = 0.0f, ry = 0.0f, rz = 0.0f;
-    err = jointIf->GetJointLocalRotationByEuler(&rx, &ry, &rz, jointHandle);
-    // If it fails, we still print name but skip angles
+    jointIf->GetJointLocalPosition(&data.localPx, &data.localPy, &data.localPz, jointHandle);
+    jointIf->GetJointLocalRotationByEuler(&data.localRx, &data.localRy, &data.localRz, jointHandle);
+    jointIf->GetJointLocalRotation(&data.localQx, &data.localQy, &data.localQz, &data.localQw,
+                                   jointHandle);
 
-    std::string indent(indentSpaces, ' ');
-    std::cout << indent << (jointName ? jointName : "<null>")
-              << " : Euler(" << rx << ", " << ry << ", " << rz << ")\n";
-
-    // Children
-    MCPJointHandle_t childJoints[64];
-    uint32_t childCount = 64;
-    err = jointIf->GetJointChild(childJoints, &childCount, jointHandle);
-    if (err != Error_None || childCount == 0) {
-        return; // no children or error
+    MCPBodyPartHandle_t bodyPartHandle = 0;
+    if (jointIf->GetJointBodyPart(&bodyPartHandle, jointHandle) == Error_None &&
+        bodyPartHandle != 0) {
+        bodyPartIf->GetJointPosition(&data.worldPx, &data.worldPy, &data.worldPz, bodyPartHandle);
+        bodyPartIf->GetBodyPartPosture(&data.worldQx, &data.worldQy, &data.worldQz, &data.worldQw,
+                                       bodyPartHandle);
     }
 
-    for (uint32_t i = 0; i < childCount; ++i) {
-        if (childJoints[i]) {
-            DumpJointTree(jointIf, childJoints[i], indentSpaces + 2);
-        }
-    }
+    return data;
 }
 
 int main()
@@ -67,13 +84,31 @@ int main()
 
     std::cout << "MocapApi BVH subscriber starting...\n";
 
+    // Surface how many data categories the API exposes through its event system.
+    const std::vector<std::string> apiDataTypes = {
+        "Avatar motion frames (MCPEvent_AvatarUpdated)",
+        "Rigid body transforms (MCPEvent_RigidBodyUpdated)",
+        "Sensor module telemetry (MCPEvent_SensorModulesUpdated)",
+        "Tracker transforms (MCPEvent_TrackerUpdated)",
+        "Marker positions (MCPEvent_MarkerData)",
+        "PWR data (MCPEvent_PWRData)",
+        "Command replies (MCPEvent_CommandReply)",
+        "Notifications (MCPEvent_Notify)"};
+
+    std::cout << "API exposes " << apiDataTypes.size()
+              << " data categories via events:" << std::endl;
+    for (const auto& type : apiDataTypes) {
+        std::cout << "  - " << type << std::endl;
+    }
+
     EMCPError err = Error_None;
 
     // === 1. Get core interfaces ===
-    IMCPApplication* app        = nullptr;
-    IMCPSettings*    settingsIf = nullptr;
-    IMCPAvatar*      avatarIf   = nullptr;
-    IMCPJoint*       jointIf    = nullptr;
+    IMCPApplication* app         = nullptr;
+    IMCPSettings*    settingsIf  = nullptr;
+    IMCPAvatar*      avatarIf    = nullptr;
+    IMCPJoint*       jointIf     = nullptr;
+    IMCPBodyPart*    bodyPartIf  = nullptr;
 
     err = MCPGetGenericInterface(IMCPApplication_Version,
                                  reinterpret_cast<void**>(&app));
@@ -103,6 +138,14 @@ int main()
                                  reinterpret_cast<void**>(&jointIf));
     if (err != Error_None || !jointIf) {
         std::cerr << "Failed to get IMCPJoint, err="
+                  << static_cast<int>(err) << "\n";
+        return 1;
+    }
+
+    err = MCPGetGenericInterface(IMCPBodyPart_Version,
+                                 reinterpret_cast<void**>(&bodyPartIf));
+    if (err != Error_None || !bodyPartIf) {
+        std::cerr << "Failed to get IMCPBodyPart, err="
                   << static_cast<int>(err) << "\n";
         return 1;
     }
@@ -189,7 +232,7 @@ int main()
               << SERVER_IP << ":" << PORT << " (BVH).\n";
     std::cout << "Press Ctrl+C to stop.\n";
 
-    // Timer for 1 Hz printing
+    // Timer for 0.5 Hz printing (every 2 seconds)
     auto lastPrintTime = std::chrono::steady_clock::now();
 
     // === 5. Main loop ===
@@ -206,11 +249,11 @@ int main()
         // Ignore most errors here; if something is seriously wrong, you'll see no data.
         (void)err;
 
-        // --- Decide if it's time to print (once per second) ---
+        // --- Decide if it's time to print (every 2 seconds) ---
         auto now = std::chrono::steady_clock::now();
         auto dt  = std::chrono::duration_cast<std::chrono::seconds>(now - lastPrintTime).count();
 
-        if (dt >= 10) {
+        if (dt >= 2) {
             lastPrintTime = now;
 
             // === Query avatars ===
@@ -234,15 +277,42 @@ int main()
                                   << (avatarName ? avatarName : "<unnamed>")
                                   << " ===\n";
 
-                        // Get root joint
-                        MCPJointHandle_t rootJoint = 0;
-                        err = avatarIf->GetAvatarRootJoint(&rootJoint, avatarHandle);
-                        if (err != Error_None || !rootJoint) {
-                            std::cerr << "GetAvatarRootJoint failed, err="
+                        uint32_t jointCount = 0;
+                        err = avatarIf->GetAvatarJoints(nullptr, &jointCount, avatarHandle);
+                        if (err != Error_None || jointCount == 0) {
+                            std::cout << "[Info] No joints yet for this avatar.\n";
+                            continue;
+                        }
+
+                        std::vector<MCPJointHandle_t> joints(jointCount);
+                        err = avatarIf->GetAvatarJoints(joints.data(), &jointCount, avatarHandle);
+                        if (err != Error_None) {
+                            std::cerr << "GetAvatarJoints failed, err="
                                       << static_cast<int>(err) << "\n";
-                        } else {
-                            // Print entire joint tree from root
-                            DumpJointTree(jointIf, rootJoint, 0);
+                            continue;
+                        }
+
+                        std::cout << "-- Joint data (BVH broadcast) --\n";
+                        for (uint32_t j = 0; j < jointCount; ++j) {
+                            MCPJointHandle_t jointHandle = joints[j];
+                            auto data = GetJointFullData(jointIf, bodyPartIf, jointHandle);
+                            if (!data) continue;
+
+                            std::cout << "  " << data->jointName
+                                      << " [tag " << static_cast<int>(data->tag) << "]"
+                                      << "\n";
+                            std::cout << "    Local Pos : (" << data->localPx << ", "
+                                      << data->localPy << ", " << data->localPz << ")\n";
+                            std::cout << "    Local Rot : Euler(" << data->localRx << ", "
+                                      << data->localRy << ", " << data->localRz
+                                      << ")  Quaternion(" << data->localQx << ", "
+                                      << data->localQy << ", " << data->localQz
+                                      << ", " << data->localQw << ")\n";
+                            std::cout << "    World Pos : (" << data->worldPx << ", "
+                                      << data->worldPy << ", " << data->worldPz << ")\n";
+                            std::cout << "    World Rot : Quaternion(" << data->worldQx
+                                      << ", " << data->worldQy << ", " << data->worldQz
+                                      << ", " << data->worldQw << ")\n";
                         }
                     }
                 }
