@@ -2,7 +2,7 @@
 //
 // Simple MocapApi BVH subscriber.
 // - Connects to Axis Studio BVH broadcast at 127.0.0.1:7012
-// - Every 1 second, prints all joints' local Euler angles
+// - Every 2 seconds (0.5 Hz), prints hand joint Euler angles and wrist 6D pose
 //
 // Build:
 //   - Include path: <repo_root>/include
@@ -13,51 +13,68 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include <thread>
 #include <chrono>
+#include <optional>
+#include <thread>
 
 #include "MocapApi.h"
 
 using namespace MocapApi;
 
-// Helper: print one joint and recurse on children
-void DumpJointTree(IMCPJoint* jointIf,
-                   MCPJointHandle_t jointHandle,
-                   int indentSpaces)
+struct WristPose
 {
-    if (!jointIf || !jointHandle) return;
+    std::string jointName;
+    float px = 0.0f;
+    float py = 0.0f;
+    float pz = 0.0f;
+    float qx = 0.0f;
+    float qy = 0.0f;
+    float qz = 0.0f;
+    float qw = 1.0f;
+};
 
-    EMCPError err = Error_None;
+std::optional<WristPose> GetWristPose(IMCPJoint*     jointIf,
+                                      IMCPBodyPart* bodyPartIf,
+                                      MCPJointHandle_t jointHandle)
+{
+    if (!jointIf || !bodyPartIf || !jointHandle) return std::nullopt;
 
-    // Joint name
+    WristPose pose;
+
     const char* jointName = nullptr;
-    err = jointIf->GetJointName(&jointName, jointHandle);
-    if (err != Error_None) {
-        jointName = "<unknown_joint>";
+    if (jointIf->GetJointName(&jointName, jointHandle) == Error_None && jointName) {
+        pose.jointName = jointName;
+    } else {
+        pose.jointName = "<unknown_wrist>";
     }
 
-    // Local Euler rotation
-    float rx = 0.0f, ry = 0.0f, rz = 0.0f;
-    err = jointIf->GetJointLocalRotationByEuler(&rx, &ry, &rz, jointHandle);
-    // If it fails, we still print name but skip angles
-
-    std::string indent(indentSpaces, ' ');
-    std::cout << indent << (jointName ? jointName : "<null>")
-              << " : Euler(" << rx << ", " << ry << ", " << rz << ")\n";
-
-    // Children
-    MCPJointHandle_t childJoints[64];
-    uint32_t childCount = 64;
-    err = jointIf->GetJointChild(childJoints, &childCount, jointHandle);
-    if (err != Error_None || childCount == 0) {
-        return; // no children or error
+    MCPBodyPartHandle_t bodyPartHandle = 0;
+    if (jointIf->GetJointBodyPart(&bodyPartHandle, jointHandle) != Error_None ||
+        bodyPartHandle == 0) {
+        return std::nullopt;
     }
 
-    for (uint32_t i = 0; i < childCount; ++i) {
-        if (childJoints[i]) {
-            DumpJointTree(jointIf, childJoints[i], indentSpaces + 2);
-        }
+    if (bodyPartIf->GetJointPosition(&pose.px, &pose.py, &pose.pz, bodyPartHandle) !=
+        Error_None) {
+        return std::nullopt;
     }
+
+    if (bodyPartIf->GetBodyPartPosture(&pose.qx, &pose.qy, &pose.qz, &pose.qw,
+                                       bodyPartHandle) != Error_None) {
+        return std::nullopt;
+    }
+
+    return pose;
+}
+
+bool IsRightHandTag(EMCPJointTag tag)
+{
+    return tag >= JointTag_RightHand && tag <= JointTag_RightHandPinky3;
+}
+
+bool IsLeftHandTag(EMCPJointTag tag)
+{
+    return tag >= JointTag_LeftHand && tag <= JointTag_LeftHandPinky3;
 }
 
 int main()
@@ -70,10 +87,11 @@ int main()
     EMCPError err = Error_None;
 
     // === 1. Get core interfaces ===
-    IMCPApplication* app        = nullptr;
-    IMCPSettings*    settingsIf = nullptr;
-    IMCPAvatar*      avatarIf   = nullptr;
-    IMCPJoint*       jointIf    = nullptr;
+    IMCPApplication* app         = nullptr;
+    IMCPSettings*    settingsIf  = nullptr;
+    IMCPAvatar*      avatarIf    = nullptr;
+    IMCPJoint*       jointIf     = nullptr;
+    IMCPBodyPart*    bodyPartIf  = nullptr;
 
     err = MCPGetGenericInterface(IMCPApplication_Version,
                                  reinterpret_cast<void**>(&app));
@@ -103,6 +121,14 @@ int main()
                                  reinterpret_cast<void**>(&jointIf));
     if (err != Error_None || !jointIf) {
         std::cerr << "Failed to get IMCPJoint, err="
+                  << static_cast<int>(err) << "\n";
+        return 1;
+    }
+
+    err = MCPGetGenericInterface(IMCPBodyPart_Version,
+                                 reinterpret_cast<void**>(&bodyPartIf));
+    if (err != Error_None || !bodyPartIf) {
+        std::cerr << "Failed to get IMCPBodyPart, err="
                   << static_cast<int>(err) << "\n";
         return 1;
     }
@@ -189,7 +215,7 @@ int main()
               << SERVER_IP << ":" << PORT << " (BVH).\n";
     std::cout << "Press Ctrl+C to stop.\n";
 
-    // Timer for 1 Hz printing
+    // Timer for 0.5 Hz printing (every 2 seconds)
     auto lastPrintTime = std::chrono::steady_clock::now();
 
     // === 5. Main loop ===
@@ -206,11 +232,11 @@ int main()
         // Ignore most errors here; if something is seriously wrong, you'll see no data.
         (void)err;
 
-        // --- Decide if it's time to print (once per second) ---
+        // --- Decide if it's time to print (every 2 seconds) ---
         auto now = std::chrono::steady_clock::now();
         auto dt  = std::chrono::duration_cast<std::chrono::seconds>(now - lastPrintTime).count();
 
-        if (dt >= 10) {
+        if (dt >= 2) {
             lastPrintTime = now;
 
             // === Query avatars ===
@@ -234,15 +260,78 @@ int main()
                                   << (avatarName ? avatarName : "<unnamed>")
                                   << " ===\n";
 
-                        // Get root joint
-                        MCPJointHandle_t rootJoint = 0;
-                        err = avatarIf->GetAvatarRootJoint(&rootJoint, avatarHandle);
-                        if (err != Error_None || !rootJoint) {
-                            std::cerr << "GetAvatarRootJoint failed, err="
+                        uint32_t jointCount = 0;
+                        err = avatarIf->GetAvatarJoints(nullptr, &jointCount, avatarHandle);
+                        if (err != Error_None || jointCount == 0) {
+                            std::cout << "[Info] No joints yet for this avatar.\n";
+                            continue;
+                        }
+
+                        std::vector<MCPJointHandle_t> joints(jointCount);
+                        err = avatarIf->GetAvatarJoints(joints.data(), &jointCount, avatarHandle);
+                        if (err != Error_None) {
+                            std::cerr << "GetAvatarJoints failed, err="
                                       << static_cast<int>(err) << "\n";
+                            continue;
+                        }
+
+                        MCPJointHandle_t leftWrist  = 0;
+                        MCPJointHandle_t rightWrist = 0;
+
+                        std::cout << "-- Hand joint Euler angles --\n";
+                        for (uint32_t j = 0; j < jointCount; ++j) {
+                            MCPJointHandle_t jointHandle = joints[j];
+                            EMCPJointTag tag = JointTag_Invalid;
+                            if (jointIf->GetJointTag(&tag, jointHandle) != Error_None) {
+                                continue;
+                            }
+
+                            if (tag == JointTag_LeftHand) {
+                                leftWrist = jointHandle;
+                            } else if (tag == JointTag_RightHand) {
+                                rightWrist = jointHandle;
+                            }
+
+                            if (!IsLeftHandTag(tag) && !IsRightHandTag(tag)) {
+                                continue;
+                            }
+
+                            const char* name = nullptr;
+                            jointIf->GetJointName(&name, jointHandle);
+
+                            float rx = 0.0f, ry = 0.0f, rz = 0.0f;
+                            jointIf->GetJointLocalRotationByEuler(&rx, &ry, &rz, jointHandle);
+
+                            std::cout << "  "
+                                      << (name ? name : "<joint>")
+                                      << " : Euler(" << rx << ", " << ry
+                                      << ", " << rz << ")\n";
+                        }
+
+                        std::cout << "-- Wrist 6D pose (position + quaternion) --\n";
+
+                        auto rightPose = GetWristPose(jointIf, bodyPartIf, rightWrist);
+                        if (rightPose) {
+                            std::cout << "  Right wrist [" << rightPose->jointName
+                                      << "]: Pos(" << rightPose->px << ", "
+                                      << rightPose->py << ", " << rightPose->pz
+                                      << ")  Rot(" << rightPose->qx << ", "
+                                      << rightPose->qy << ", " << rightPose->qz
+                                      << ", " << rightPose->qw << ")\n";
                         } else {
-                            // Print entire joint tree from root
-                            DumpJointTree(jointIf, rootJoint, 0);
+                            std::cout << "  Right wrist data unavailable.\n";
+                        }
+
+                        auto leftPose = GetWristPose(jointIf, bodyPartIf, leftWrist);
+                        if (leftPose) {
+                            std::cout << "  Left wrist [" << leftPose->jointName
+                                      << "]: Pos(" << leftPose->px << ", "
+                                      << leftPose->py << ", " << leftPose->pz
+                                      << ")  Rot(" << leftPose->qx << ", "
+                                      << leftPose->qy << ", " << leftPose->qz
+                                      << ", " << leftPose->qw << ")\n";
+                        } else {
+                            std::cout << "  Left wrist data unavailable.\n";
                         }
                     }
                 }
