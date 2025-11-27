@@ -16,6 +16,10 @@ int main() {
     const char* SERVER_IP = "127.0.0.1";
     const uint16_t PORT   = 7012;
 
+    const float VIEW_PITCH_DEG = -20.0f;
+    const float VIEW_YAW_DEG   = -30.0f;
+    const float VIEW_DISTANCE  = 6.0f;
+
     const std::vector<std::string> apiDataTypes = {
         "Avatar motion frames (MCPEvent_AvatarUpdated)",
         "Rigid body transforms (MCPEvent_RigidBodyUpdated)",
@@ -38,6 +42,8 @@ int main() {
     if (!viewer.Create(960, 720)) {
         std::cout << "Continuing without viewer (GLFW unavailable).\n";
     }
+    viewer.SetViewAngles(VIEW_PITCH_DEG, VIEW_YAW_DEG);
+    viewer.SetViewDistance(VIEW_DISTANCE);
 
     auto lastPrintTime = std::chrono::steady_clock::now();
     while (viewer.Alive()) {
