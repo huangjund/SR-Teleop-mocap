@@ -5,6 +5,9 @@ project(MocapApiCppDemo LANGUAGES CXX)
 add_executable(mocap_demo
     src/main.cpp
 )
+# Viewer dependencies
+find_package(OpenGL REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
 
 # Include the SDK headers
 target_include_directories(mocap_demo PRIVATE
@@ -18,6 +21,8 @@ target_link_directories(mocap_demo PRIVATE
 
 target_link_libraries(mocap_demo PRIVATE
     MocapApi
+    glfw
+    OpenGL::GL
 )
 
 # On Windows, use a recent C++ standard
