@@ -101,6 +101,9 @@ void SkeletonViewer::SetViewDistance(float distance) {
 void SkeletonViewer::Draw(const std::vector<JointSample>& joints) {
     if (!window_) return;
 
+    const bool drawHands = filter_ != SkeletonFilter::BodyOnly;
+    const bool drawBody  = filter_ != SkeletonFilter::HandsOnly;
+
     int fbWidth = 0, fbHeight = 0;
     glfwGetFramebufferSize(window_, &fbWidth, &fbHeight);
     glViewport(0, 0, fbWidth, fbHeight);
@@ -129,9 +132,14 @@ void SkeletonViewer::Draw(const std::vector<JointSample>& joints) {
     glBegin(GL_LINES);
     glColor3f(0.1f, 0.9f, 0.6f);
     for (const auto& j : joints) {
-        if (!IsHandJoint(j.tag)) continue;
         if (j.parentTag == MocapApi::JointTag_Invalid) continue;
-        if (!IsHandJoint(j.parentTag)) continue;
+
+        const bool isHand      = IsHandJoint(j.tag);
+        const bool parentIsHand = IsHandJoint(j.parentTag);
+
+        if ((isHand && !drawHands) || (!isHand && !drawBody)) continue;
+        if ((parentIsHand && !drawHands) || (!parentIsHand && !drawBody)) continue;
+
         auto it = tagToIndex.find(static_cast<int>(j.parentTag));
         if (it == tagToIndex.end()) continue;
 

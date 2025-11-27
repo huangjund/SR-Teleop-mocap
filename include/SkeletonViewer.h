@@ -8,6 +8,8 @@
 
 class SkeletonViewer {
 public:
+    enum class SkeletonFilter { HandsOnly, BodyOnly, FullSkeleton };
+
     SkeletonViewer() = default;
     ~SkeletonViewer();
 
@@ -17,8 +19,10 @@ public:
 
     void SetViewAngles(float pitchDegrees, float yawDegrees);
     void SetViewDistance(float distance);
+    void SetSkeletonFilter(SkeletonFilter filter) { filter_ = filter; }
 
 private:
+    SkeletonFilter filter_   = SkeletonFilter::HandsOnly;
     float pitchDegrees_ = -20.0f;
     float yawDegrees_   = 0.0f;
     float distance_     = 6.0f;
