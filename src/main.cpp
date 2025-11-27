@@ -19,6 +19,7 @@ int main() {
     const float VIEW_PITCH_DEG = -20.0f;
     const float VIEW_YAW_DEG   = -30.0f;
     const float VIEW_DISTANCE  = 6.0f;
+    const SkeletonViewer::SkeletonFilter VIEW_FILTER = SkeletonViewer::SkeletonFilter::FullSkeleton;
 
     const std::vector<std::string> apiDataTypes = {
         "Avatar motion frames (MCPEvent_AvatarUpdated)",
@@ -44,6 +45,7 @@ int main() {
     }
     viewer.SetViewAngles(VIEW_PITCH_DEG, VIEW_YAW_DEG);
     viewer.SetViewDistance(VIEW_DISTANCE);
+    viewer.SetSkeletonFilter(VIEW_FILTER);
 
     auto lastPrintTime = std::chrono::steady_clock::now();
     while (viewer.Alive()) {
