@@ -15,6 +15,12 @@ public:
     bool Alive() const;
     void Draw(const std::vector<JointSample>& joints);
 
+    void SetViewAngles(float pitchDegrees, float yawDegrees);
+    void SetViewDistance(float distance);
+
 private:
+    float pitchDegrees_ = -20.0f;
+    float yawDegrees_   = 0.0f;
+    float distance_     = 6.0f;
     GLFWwindow* window_ = nullptr;
 };

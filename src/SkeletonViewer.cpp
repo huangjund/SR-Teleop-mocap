@@ -89,6 +89,15 @@ bool SkeletonViewer::Alive() const {
     return !window_ || !glfwWindowShouldClose(window_);
 }
 
+void SkeletonViewer::SetViewAngles(float pitchDegrees, float yawDegrees) {
+    pitchDegrees_ = pitchDegrees;
+    yawDegrees_   = yawDegrees;
+}
+
+void SkeletonViewer::SetViewDistance(float distance) {
+    distance_ = distance;
+}
+
 void SkeletonViewer::Draw(const std::vector<JointSample>& joints) {
     if (!window_) return;
 
@@ -107,9 +116,9 @@ void SkeletonViewer::Draw(const std::vector<JointSample>& joints) {
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glTranslatef(0.0f, -0.5f, -6.0f);
-    glRotatef(-20.0f, 1.0f, 0.0f, 0.0f);
-    glRotatef(static_cast<float>(glfwGetTime()) * 10.0f, 0.0f, 1.0f, 0.0f);
+    glTranslatef(0.0f, -0.5f, -distance_);
+    glRotatef(pitchDegrees_, 1.0f, 0.0f, 0.0f);
+    glRotatef(yawDegrees_, 0.0f, 1.0f, 0.0f);
 
     std::unordered_map<int, size_t> tagToIndex;
     tagToIndex.reserve(joints.size());
