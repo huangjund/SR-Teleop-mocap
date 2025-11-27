@@ -10,6 +10,19 @@
 //   - Put          <repo_root>/bin/win32/x64/MocapApi.dll
 //     next to your executable (or in PATH).
 
+// MocapApi BVH subscriber starting...
+// API exposes 8 data categories via events:
+//   - Avatar motion frames (MCPEvent_AvatarUpdated)
+//   - Rigid body transforms (MCPEvent_RigidBodyUpdated)
+//   - Sensor module telemetry (MCPEvent_SensorModulesUpdated)
+//   - Tracker transforms (MCPEvent_TrackerUpdated)
+//   - Marker positions (MCPEvent_MarkerData)
+//   - PWR data (MCPEvent_PWRData)
+//   - Command replies (MCPEvent_CommandReply)
+//   - Notifications (MCPEvent_Notify)
+// Connected to Axis Studio at 127.0.0.1:7012 (BVH).
+
+
 #include <iostream>
 #include <vector>
 #include <string>
@@ -313,7 +326,9 @@ int main()
                             std::cout << "    World Rot : Quaternion(" << data->worldQx
                                       << ", " << data->worldQy << ", " << data->worldQz
                                       << ", " << data->worldQw << ")\n";
-                        }
+
+
+                                    }
                     }
                 }
             }
