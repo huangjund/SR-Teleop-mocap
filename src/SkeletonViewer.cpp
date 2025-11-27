@@ -70,7 +70,7 @@ void SkeletonViewer::Draw(const std::vector<JointSample>& joints) {
     glBegin(GL_LINES);
     glColor3f(0.1f, 0.9f, 0.6f);
     for (const auto& j : joints) {
-        if (j.parentTag == JointTag_Invalid) continue;
+        if (j.parentTag == MocapApi::JointTag_Invalid) continue;
         auto it = tagToIndex.find(static_cast<int>(j.parentTag));
         if (it == tagToIndex.end()) continue;
 

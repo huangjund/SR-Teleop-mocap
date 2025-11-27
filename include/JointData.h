@@ -10,7 +10,7 @@
 
 struct JointFullData {
     std::string jointName;
-    EMCPJointTag tag = JointTag_Invalid;
+    MocapApi::EMCPJointTag tag = MocapApi::JointTag_Invalid;
     float localPx    = 0.0f;
     float localPy    = 0.0f;
     float localPz    = 0.0f;
@@ -32,20 +32,20 @@ struct JointFullData {
 
 struct JointSample {
     std::string jointName;
-    EMCPJointTag tag       = JointTag_Invalid;
-    EMCPJointTag parentTag = JointTag_Invalid;
+    MocapApi::EMCPJointTag tag       = MocapApi::JointTag_Invalid;
+    MocapApi::EMCPJointTag parentTag = MocapApi::JointTag_Invalid;
     Vec3        localPos{};
     Quat        localRot{};
     Vec3        worldPos{};
     Quat        worldRot{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-std::optional<JointFullData> GetJointFullData(IMCPJoint*       jointIf,
-                                              IMCPBodyPart*    bodyPartIf,
-                                              MCPJointHandle_t jointHandle);
+std::optional<JointFullData> GetJointFullData(MocapApi::IMCPJoint*       jointIf,
+                                              MocapApi::IMCPBodyPart*    bodyPartIf,
+                                              MocapApi::MCPJointHandle_t jointHandle);
 
-std::optional<JointSample> GetJointSample(IMCPJoint*       jointIf,
-                                          IMCPBodyPart*    bodyPartIf,
-                                          MCPJointHandle_t jointHandle);
+std::optional<JointSample> GetJointSample(MocapApi::IMCPJoint*       jointIf,
+                                          MocapApi::IMCPBodyPart*    bodyPartIf,
+                                          MocapApi::MCPJointHandle_t jointHandle);
 
 void ComputeWorldTransforms(std::vector<JointSample>& joints);

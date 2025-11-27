@@ -15,8 +15,8 @@ bool MocapClient::Initialize() {
     if (!CreateApplication()) return false;
     if (!ConfigureSettings()) return false;
 
-    EMCPError err = appIf_->OpenApplication(appHandle_);
-    if (err != Error_None) {
+    MocapApi::EMCPError err = appIf_->OpenApplication(appHandle_);
+    if (err != MocapApi::Error_None) {
         std::cerr << "OpenApplication failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
@@ -35,34 +35,34 @@ void MocapClient::Shutdown() {
 }
 
 bool MocapClient::AcquireInterfaces() {
-    EMCPError err = Error_None;
+    MocapApi::EMCPError err = MocapApi::Error_None;
 
-    err = MCPGetGenericInterface(IMCPApplication_Version, reinterpret_cast<void**>(&appIf_));
-    if (err != Error_None || !appIf_) {
+    err = MocapApi::MCPGetGenericInterface(MocapApi::IMCPApplication_Version, reinterpret_cast<void**>(&appIf_));
+    if (err != MocapApi::Error_None || !appIf_) {
         std::cerr << "Failed to get IMCPApplication, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = MCPGetGenericInterface(IMCPSettings_Version, reinterpret_cast<void**>(&settings_));
-    if (err != Error_None || !settings_) {
+    err = MocapApi::MCPGetGenericInterface(MocapApi::IMCPSettings_Version, reinterpret_cast<void**>(&settings_));
+    if (err != MocapApi::Error_None || !settings_) {
         std::cerr << "Failed to get IMCPSettings, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = MCPGetGenericInterface(IMCPAvatar_Version, reinterpret_cast<void**>(&avatarIf_));
-    if (err != Error_None || !avatarIf_) {
+    err = MocapApi::MCPGetGenericInterface(MocapApi::IMCPAvatar_Version, reinterpret_cast<void**>(&avatarIf_));
+    if (err != MocapApi::Error_None || !avatarIf_) {
         std::cerr << "Failed to get IMCPAvatar, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = MCPGetGenericInterface(IMCPJoint_Version, reinterpret_cast<void**>(&jointIf_));
-    if (err != Error_None || !jointIf_) {
+    err = MocapApi::MCPGetGenericInterface(MocapApi::IMCPJoint_Version, reinterpret_cast<void**>(&jointIf_));
+    if (err != MocapApi::Error_None || !jointIf_) {
         std::cerr << "Failed to get IMCPJoint, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = MCPGetGenericInterface(IMCPBodyPart_Version, reinterpret_cast<void**>(&bodyPart_));
-    if (err != Error_None || !bodyPart_) {
+    err = MocapApi::MCPGetGenericInterface(MocapApi::IMCPBodyPart_Version, reinterpret_cast<void**>(&bodyPart_));
+    if (err != MocapApi::Error_None || !bodyPart_) {
         std::cerr << "Failed to get IMCPBodyPart, err=" << static_cast<int>(err) << "\n";
         return false;
     }
@@ -71,14 +71,14 @@ bool MocapClient::AcquireInterfaces() {
 }
 
 bool MocapClient::CreateApplication() {
-    EMCPError err = appIf_->CreateApplication(&appHandle_);
-    if (err != Error_None) {
+    MocapApi::EMCPError err = appIf_->CreateApplication(&appHandle_);
+    if (err != MocapApi::Error_None) {
         std::cerr << "CreateApplication failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
     err = settings_->CreateSettings(&settingsHandle_);
-    if (err != Error_None) {
+    if (err != MocapApi::Error_None) {
         std::cerr << "CreateSettings failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
@@ -87,38 +87,38 @@ bool MocapClient::CreateApplication() {
 }
 
 bool MocapClient::ConfigureSettings() {
-    EMCPError err = settings_->SetSettingsUDP(port_, settingsHandle_);
-    if (err != Error_None) {
+    MocapApi::EMCPError err = settings_->SetSettingsUDP(port_, settingsHandle_);
+    if (err != MocapApi::Error_None) {
         std::cerr << "SetSettingsUDP failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
     err = settings_->SetSettingsUDPServer(serverIp_.c_str(), port_, settingsHandle_);
-    if (err != Error_None) {
+    if (err != MocapApi::Error_None) {
         std::cerr << "SetSettingsUDPServer failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = settings_->SetSettingsBvhRotation(BvhRotation_XYZ, settingsHandle_);
-    if (err != Error_None) {
+    err = settings_->SetSettingsBvhRotation(MocapApi::BvhRotation_XYZ, settingsHandle_);
+    if (err != MocapApi::Error_None) {
         std::cerr << "SetSettingsBvhRotation failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = settings_->SetSettingsBvhData(BvhDataType_Binary, settingsHandle_);
-    if (err != Error_None) {
+    err = settings_->SetSettingsBvhData(MocapApi::BvhDataType_Binary, settingsHandle_);
+    if (err != MocapApi::Error_None) {
         std::cerr << "SetSettingsBvhData failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
-    err = settings_->SetSettingsBvhTransformation(BvhTransformation_Enable, settingsHandle_);
-    if (err != Error_None) {
+    err = settings_->SetSettingsBvhTransformation(MocapApi::BvhTransformation_Enable, settingsHandle_);
+    if (err != MocapApi::Error_None) {
         std::cerr << "SetSettingsBvhTransformation failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
     err = appIf_->SetApplicationSettings(settingsHandle_, appHandle_);
-    if (err != Error_None) {
+    if (err != MocapApi::Error_None) {
         std::cerr << "SetApplicationSettings failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
@@ -128,29 +128,29 @@ bool MocapClient::ConfigureSettings() {
 
 bool MocapClient::FetchAvatarData() {
     uint32_t avatarCount = 0;
-    EMCPError err        = appIf_->GetApplicationAvatars(nullptr, &avatarCount, appHandle_);
-    if (err != Error_None || avatarCount == 0) {
+    MocapApi::EMCPError err        = appIf_->GetApplicationAvatars(nullptr, &avatarCount, appHandle_);
+    if (err != MocapApi::Error_None || avatarCount == 0) {
         latestJoints_.clear();
         return false;
     }
 
-    std::vector<MCPAvatarHandle_t> avatars(avatarCount);
-    if (appIf_->GetApplicationAvatars(avatars.data(), &avatarCount, appHandle_) != Error_None) {
+    std::vector<MocapApi::MCPAvatarHandle_t> avatars(avatarCount);
+    if (appIf_->GetApplicationAvatars(avatars.data(), &avatarCount, appHandle_) != MocapApi::Error_None) {
         latestJoints_.clear();
         return false;
     }
 
     latestJoints_.clear();
     for (uint32_t i = 0; i < avatarCount; ++i) {
-        MCPAvatarHandle_t avatarHandle = avatars[i];
+        MocapApi::MCPAvatarHandle_t avatarHandle = avatars[i];
 
         uint32_t jointCount = 0;
-        if (avatarIf_->GetAvatarJoints(nullptr, &jointCount, avatarHandle) != Error_None || jointCount == 0) {
+        if (avatarIf_->GetAvatarJoints(nullptr, &jointCount, avatarHandle) != MocapApi::Error_None || jointCount == 0) {
             continue;
         }
 
-        std::vector<MCPJointHandle_t> joints(jointCount);
-        if (avatarIf_->GetAvatarJoints(joints.data(), &jointCount, avatarHandle) != Error_None) {
+        std::vector<MocapApi::MCPJointHandle_t> joints(jointCount);
+        if (avatarIf_->GetAvatarJoints(joints.data(), &jointCount, avatarHandle) != MocapApi::Error_None) {
             continue;
         }
 
@@ -169,13 +169,13 @@ bool MocapClient::FetchAvatarData() {
 }
 
 bool MocapClient::Poll() {
-    MCPEvent_t events[16];
+    MocapApi::MCPEvent_t events[16];
     uint32_t   eventCount = 16;
     for (uint32_t i = 0; i < eventCount; ++i) {
-        events[i].size = sizeof(MCPEvent_t);
+        events[i].size = sizeof(MocapApi::MCPEvent_t);
     }
 
-    EMCPError err = appIf_->PollApplicationNextEvent(events, &eventCount, appHandle_);
+    MocapApi::EMCPError err = appIf_->PollApplicationNextEvent(events, &eventCount, appHandle_);
     (void)err;
 
     return FetchAvatarData();

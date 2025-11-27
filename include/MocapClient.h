@@ -26,14 +26,14 @@ private:
     std::string serverIp_;
     uint16_t    port_;
 
-    IMCPApplication* appIf_   = nullptr;
-    IMCPSettings*    settings_ = nullptr;
-    IMCPAvatar*      avatarIf_ = nullptr;
-    IMCPJoint*       jointIf_  = nullptr;
-    IMCPBodyPart*    bodyPart_ = nullptr;
+    MocapApi::IMCPApplication* appIf_    = nullptr;
+    MocapApi::IMCPSettings*    settings_ = nullptr;
+    MocapApi::IMCPAvatar*      avatarIf_ = nullptr;
+    MocapApi::IMCPJoint*       jointIf_  = nullptr;
+    MocapApi::IMCPBodyPart*    bodyPart_ = nullptr;
 
-    MCPApplicationHandle_t appHandle_      = 0;
-    MCPSettingsHandle_t    settingsHandle_ = 0;
+    MocapApi::MCPApplicationHandle_t appHandle_      = 0;
+    MocapApi::MCPSettingsHandle_t    settingsHandle_ = 0;
 
     std::vector<JointSample> latestJoints_;
 };

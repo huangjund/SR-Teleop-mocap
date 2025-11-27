@@ -2,9 +2,9 @@
 
 #include <functional>
 
-std::optional<JointFullData> GetJointFullData(IMCPJoint*       jointIf,
-                                              IMCPBodyPart*    bodyPartIf,
-                                              MCPJointHandle_t jointHandle) {
+std::optional<JointFullData> GetJointFullData(MocapApi::IMCPJoint*       jointIf,
+                                              MocapApi::IMCPBodyPart*    bodyPartIf,
+                                              MocapApi::MCPJointHandle_t jointHandle) {
     if (!jointIf || !bodyPartIf || !jointHandle) return std::nullopt;
 
     JointFullData data;
@@ -12,7 +12,7 @@ std::optional<JointFullData> GetJointFullData(IMCPJoint*       jointIf,
     jointIf->GetJointTag(&data.tag, jointHandle);
 
     const char* jointName = nullptr;
-    if (jointIf->GetJointName(&jointName, jointHandle) == Error_None && jointName) {
+    if (jointIf->GetJointName(&jointName, jointHandle) == MocapApi::Error_None && jointName) {
         data.jointName = jointName;
     } else {
         data.jointName = "<unknown_joint>";
@@ -23,8 +23,8 @@ std::optional<JointFullData> GetJointFullData(IMCPJoint*       jointIf,
     jointIf->GetJointLocalRotation(&data.localQx, &data.localQy, &data.localQz, &data.localQw,
                                    jointHandle);
 
-    MCPBodyPartHandle_t bodyPartHandle = 0;
-    if (jointIf->GetJointBodyPart(&bodyPartHandle, jointHandle) == Error_None && bodyPartHandle != 0) {
+    MocapApi::MCPBodyPartHandle_t bodyPartHandle = 0;
+    if (jointIf->GetJointBodyPart(&bodyPartHandle, jointHandle) == MocapApi::Error_None && bodyPartHandle != 0) {
         bodyPartIf->GetJointPosition(&data.worldPx, &data.worldPy, &data.worldPz, bodyPartHandle);
         bodyPartIf->GetBodyPartPosture(&data.worldQx, &data.worldQy, &data.worldQz, &data.worldQw,
                                        bodyPartHandle);
@@ -33,15 +33,15 @@ std::optional<JointFullData> GetJointFullData(IMCPJoint*       jointIf,
     return data;
 }
 
-std::optional<JointSample> GetJointSample(IMCPJoint*       jointIf,
-                                          IMCPBodyPart*    bodyPartIf,
-                                          MCPJointHandle_t jointHandle) {
+std::optional<JointSample> GetJointSample(MocapApi::IMCPJoint*       jointIf,
+                                          MocapApi::IMCPBodyPart*    bodyPartIf,
+                                          MocapApi::MCPJointHandle_t jointHandle) {
     if (!jointIf || !bodyPartIf || !jointHandle) return std::nullopt;
 
     JointSample sample;
 
     const char* name = nullptr;
-    if (jointIf->GetJointName(&name, jointHandle) == Error_None && name) {
+    if (jointIf->GetJointName(&name, jointHandle) == MocapApi::Error_None && name) {
         sample.jointName = name;
     } else {
         sample.jointName = "<unknown_joint>";
@@ -52,8 +52,8 @@ std::optional<JointSample> GetJointSample(IMCPJoint*       jointIf,
     jointIf->GetJointLocalRotation(&sample.localRot.x, &sample.localRot.y, &sample.localRot.z, &sample.localRot.w,
                                    jointHandle);
 
-    EMCPJointTag parentTag = JointTag_Invalid;
-    if (jointIf->GetJointParentJointTag(&parentTag, sample.tag) == Error_None) {
+    MocapApi::EMCPJointTag parentTag = MocapApi::JointTag_Invalid;
+    if (jointIf->GetJointParentJointTag(&parentTag, sample.tag) == MocapApi::Error_None) {
         sample.parentTag = parentTag;
     }
 
@@ -73,7 +73,7 @@ void ComputeWorldTransforms(std::vector<JointSample>& joints) {
             return;
         }
 
-        if (j.parentTag != JointTag_Invalid) {
+        if (j.parentTag != MocapApi::JointTag_Invalid) {
             auto it = tagToIndex.find(static_cast<int>(j.parentTag));
             if (it != tagToIndex.end()) {
                 resolve(it->second);
