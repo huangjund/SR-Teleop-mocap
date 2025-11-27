@@ -2,15 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 project(MocapApiCppDemo LANGUAGES CXX)
 
 find_package(OpenGL REQUIRED)
-# Prefer a CMake config package for GLFW if available; otherwise fall back to
-# pkg-config (common on Linux distributions).
-find_package(glfw3 QUIET)
-if (NOT glfw3_FOUND)
-    find_package(PkgConfig QUIET)
-    if (PkgConfig_FOUND)
-        pkg_check_modules(GLFW3 glfw3)
-    endif()
-endif()
+find_package(glfw3 REQUIRED)
 
 # Your executable source
 add_executable(mocap_demo
@@ -48,19 +40,9 @@ target_link_directories(mocap_hands_viewer PRIVATE
 
 target_link_libraries(mocap_hands_viewer PRIVATE
     MocapApi
+    glfw
     OpenGL::GL
 )
-
-if (TARGET glfw)
-    target_link_libraries(mocap_hands_viewer PRIVATE glfw)
-elseif (TARGET glfw3)
-    target_link_libraries(mocap_hands_viewer PRIVATE glfw3)
-elseif (TARGET PkgConfig::GLFW3)
-    target_link_libraries(mocap_hands_viewer PRIVATE PkgConfig::GLFW3)
-    target_include_directories(mocap_hands_viewer PRIVATE ${GLFW3_INCLUDE_DIRS})
-else()
-    message(FATAL_ERROR "GLFW dependency not found. Provide glfw3Config.cmake or install glfw3 via pkg-config.")
-endif()
 
 # On Windows, use a recent C++ standard
 target_compile_features(mocap_demo PRIVATE cxx_std_17)
