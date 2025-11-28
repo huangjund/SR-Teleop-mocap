@@ -22,8 +22,8 @@ English Documentation : https://mocap-api.noitom.com/mocap_api_en.html
 
 ## BVH stream viewer
 
-Build the standalone BVH stream viewer to subscribe to Axis Studio BVH output, fit each frame to the
-MocapApi skeleton, and visualize the hierarchy. The viewer never renders the Axis BVH hierarchy
+The default executable (`mocap_demo`) subscribes to Axis Studio BVH output, fits each frame to the
+MocapApi skeleton, and visualizes the hierarchy. The viewer never renders the Axis BVH hierarchy
 directly; every frame is re-targeted through `IMCPAvatar`/`IMCPJoint` so the drawn skeleton always
 reflects what MocapApi reports. The client requests YXZ BVH rotation order and configures render
 settings for the Axis “OPT” coordinate system (Y-up, +Z forward, right-handed, counter-clockwise
@@ -31,13 +31,17 @@ rotations).
 
 ```
 cmake -S . -B build
-cmake --build build --target bvh_stream_viewer
+cmake --build build --target mocap_demo
 ```
 
 Then launch and point it at the Axis Studio BVH UDP endpoint (defaults shown):
 
 ```
-./build/bvh_stream_viewer --server 127.0.0.1 --port 7012 --filter full
+./build/mocap_demo --server 127.0.0.1 --port 7012 --filter full
 ```
 
 Use `--filter hands` or `--filter body` to toggle which parts of the skeleton are drawn.
+
+## Skeleton scaling and body-length data
+
+You do **not** need to supply custom body-length parameters when pulling the MocapApi skeleton. Each avatar already carries the segment lengths through the joints' default local positions and bind pose that you can query from `IMCPJoint`/`IMCPBodyPart`. If you want to inspect or log those values, fetch the joint list from `IMCPAvatar`, then read the default local positions for each handle (e.g., via `GetJointDefaultLocalPosition`) to derive per-bone lengths; the BVH stream viewer already captures these local positions when it builds `JointSample` structures.
