@@ -40,12 +40,6 @@ target_link_libraries(mocap_demo PRIVATE
     OpenGL::GL
 )
 
-target_link_libraries(bvh_stream_viewer PRIVATE
-    MocapApi
-    glfw
-    OpenGL::GL
-)
-
 target_compile_features(mocap_demo PRIVATE cxx_std_17)
 
 target_link_libraries(mocap_teleop PRIVATE
