@@ -1,7 +1,7 @@
 """Simple URDF visualizer using PyBullet.
 
 Usage examples:
-    python scripts/visualize_urdf.py --urdf urdf/lrmate_with_unijoint_hand.urdf
+    python scripts/visualize_urdf.py --urdf urdf/M_lrmate_with_unijoint_hand.urdf
     python scripts/visualize_urdf.py --urdf urdf/gripper_2/gripper.urdf --free-base
 """
 
@@ -45,7 +45,7 @@ def _set_search_paths(paths: Iterable[Path]) -> None:
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
-    default_urdf = repo_root / "urdf" / "lrmate_with_unijoint_hand.urdf"
+    default_urdf = repo_root / "urdf" / "M_lrmate_with_unijoint_hand.urdf"
 
     parser = argparse.ArgumentParser(description="Visualize a URDF using PyBullet")
     parser.add_argument("--urdf", type=Path, default=default_urdf, help="Path to the URDF file to load")

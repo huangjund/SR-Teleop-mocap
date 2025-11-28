@@ -32,7 +32,7 @@ struct Options {
     uint16_t    outPort  = 15000;
     uint16_t    handPort = 15001;
     bool        enableUdp{true};
-    bool        enableHandUdp{true};
+    bool        enableHandUdp{false};
     std::vector<std::string> sides{"left", "right"};
 };
 
@@ -122,7 +122,7 @@ public:
         const float m11 = 1.0f - 2.0f * (xx + zz);
         const float m22 = 1.0f - 2.0f * (xx + yy);
 
-        const float pitch = -std::asin(std::max(-1.0f, std::min(1.0f, m12)));
+        const float pitch = -std::asin(std::clamp(m12, -1.0f, 1.0f));
         const float cp    = std::cos(pitch);
 
         const float yaw  = (std::fabs(cp) > 1e-4f) ? std::atan2(m02, m22) : 0.0f;
@@ -358,21 +358,21 @@ int main(int argc, char** argv) {
             handCommands.push_back({wrist.side, handRetargeter.Retarget(mapper.ErgonomicAngles(), wrist.side)});
         }
 
-        if (frame % 30 == 0) {
-            std::cout << "\nFrame " << frame << "\n";
-            for (const WristPose& wrist : mapper.WristPoses()) {
-                PrintWrist(wrist);
-            }
-            std::cout << "  IK solution (radians/meters)\n";
-            for (const JointCommand& cmd : commands) {
-                PrintJointCommand(cmd);
-            }
-            std::cout << "  Ergonomic hand joints (local YXZ -> flex/abduction/twist in deg):\n";
-            for (const ErgonomicJointAngles& angles : mapper.ErgonomicAngles()) {
-                PrintErgonomic(angles);
-            }
-            std::cout << std::flush;
-        }
+        // if (frame % 30 == 0) {
+        //     std::cout << "\nFrame " << frame << "\n";
+        //     for (const WristPose& wrist : mapper.WristPoses()) {
+        //         PrintWrist(wrist);
+        //     }
+        //     std::cout << "  IK solution (radians/meters)\n";
+        //     for (const JointCommand& cmd : commands) {
+        //         PrintJointCommand(cmd);
+        //     }
+        //     std::cout << "  Ergonomic hand joints (local YXZ -> flex/abduction/twist in deg):\n";
+        //     for (const ErgonomicJointAngles& angles : mapper.ErgonomicAngles()) {
+        //         PrintErgonomic(angles);
+        //     }
+        //     std::cout << std::flush;
+        // }
 
         if (opts.enableUdp && !commands.empty()) {
             wristStreamer.Send(commands, frame);
