@@ -8,6 +8,13 @@ add_executable(mocap_demo
     src/SkeletonViewer.cpp
 )
 
+add_executable(mocap_teleop
+    src/teleop_main.cpp
+    src/MocapClient.cpp
+    src/JointData.cpp
+    src/TeleopMapping.cpp
+)
+
 find_package(OpenGL REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 
@@ -15,7 +22,15 @@ target_include_directories(mocap_demo PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
+target_include_directories(mocap_teleop PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+
 target_link_directories(mocap_demo PRIVATE
+    ${CMAKE_SOURCE_DIR}/lib/win32/x64
+)
+
+target_link_directories(mocap_teleop PRIVATE
     ${CMAKE_SOURCE_DIR}/lib/win32/x64
 )
 
@@ -26,3 +41,9 @@ target_link_libraries(mocap_demo PRIVATE
 )
 
 target_compile_features(mocap_demo PRIVATE cxx_std_17)
+
+target_link_libraries(mocap_teleop PRIVATE
+    MocapApi
+)
+
+target_compile_features(mocap_teleop PRIVATE cxx_std_17)
