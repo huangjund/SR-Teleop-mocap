@@ -1,73 +1,92 @@
-// main.cpp
-//
-// Simple MocapApi BVH subscriber.
-// Splits rendering and mocap logic into lightweight classes while keeping behaviour compact.
-
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include "MocapClient.h"
 #include "SkeletonViewer.h"
 
-int main() {
-    const char* SERVER_IP = "127.0.0.1";
-    const uint16_t PORT   = 7012;
+namespace {
+struct Options {
+    std::string serverIp = "127.0.0.1";
+    uint16_t    port     = 7012;
+    SkeletonViewer::SkeletonFilter filter = SkeletonViewer::SkeletonFilter::FullSkeleton;
+};
 
-    const float VIEW_PITCH_DEG = -20.0f;
-    const float VIEW_YAW_DEG   = -30.0f;
-    const float VIEW_DISTANCE  = 6.0f;
-    const SkeletonViewer::SkeletonFilter VIEW_FILTER = SkeletonViewer::SkeletonFilter::FullSkeleton;
+SkeletonViewer::SkeletonFilter ParseFilter(const std::string& filter) {
+    if (filter == "hands") return SkeletonViewer::SkeletonFilter::HandsOnly;
+    if (filter == "body") return SkeletonViewer::SkeletonFilter::BodyOnly;
+    return SkeletonViewer::SkeletonFilter::FullSkeleton;
+}
 
-    const std::vector<std::string> apiDataTypes = {
-        "Avatar motion frames (MCPEvent_AvatarUpdated)",
-        "Rigid body transforms (MCPEvent_RigidBodyUpdated)",
-        "Sensor module telemetry (MCPEvent_SensorModulesUpdated)",
-        "Tracker transforms (MCPEvent_TrackerUpdated)",
-        "Marker positions (MCPEvent_MarkerData)",
-        "PWR data (MCPEvent_PWRData)",
-        "Command replies (MCPEvent_CommandReply)",
-        "Notifications (MCPEvent_Notify)"};
+void PrintUsage(const char* exeName) {
+    std::cout << "Usage: " << exeName
+              << " [--server <ip>] [--port <udp_port>] [--filter full|hands|body]\n";
+    std::cout << "  --server  Axis Studio host that streams BVH (default 127.0.0.1)\n";
+    std::cout << "  --port    UDP port for BVH stream (default 7012)\n";
+    std::cout << "  --filter  Which part of the skeleton to draw (default full)\n";
+}
 
-    std::cout << "API exposes " << apiDataTypes.size() << " data categories via events:" << std::endl;
-    for (const auto& type : apiDataTypes) {
-        std::cout << "  - " << type << std::endl;
+Options ParseArgs(int argc, char** argv) {
+    Options opts{};
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--server" && i + 1 < argc) {
+            opts.serverIp = argv[++i];
+        } else if (arg == "--port" && i + 1 < argc) {
+            opts.port = static_cast<uint16_t>(std::stoi(argv[++i]));
+        } else if (arg == "--filter" && i + 1 < argc) {
+            opts.filter = ParseFilter(argv[++i]);
+        } else if (arg == "--help" || arg == "-h") {
+            PrintUsage(argv[0]);
+            std::exit(0);
+        }
     }
+    return opts;
+}
+}  // namespace
 
-    MocapClient client(SERVER_IP, PORT);
+int main(int argc, char** argv) {
+    const Options opts = ParseArgs(argc, argv);
+
+    std::cout << "\n=== Axis BVH -> MocapApi Skeleton Viewer ===\n";
+    std::cout << "Server : " << opts.serverIp << ":" << opts.port << "\n";
+    std::cout << "Filter : "
+              << (opts.filter == SkeletonViewer::SkeletonFilter::FullSkeleton
+                      ? "full"
+                      : (opts.filter == SkeletonViewer::SkeletonFilter::BodyOnly ? "body" : "hands"))
+              << "\n";
+    std::cout << "Connecting to Axis Studio BVH stream (OPT coord system, YXZ rotation order); all "
+                 "visualization will use MocapApi joints reported via IMCPAvatar/IMCPJoint.\n\n";
+
+    MocapClient client(opts.serverIp, opts.port);
     if (!client.Initialize()) return 1;
 
     SkeletonViewer viewer;
-    if (!viewer.Create(960, 720)) {
-        std::cout << "Continuing without viewer (GLFW unavailable).\n";
-    }
-    viewer.SetViewAngles(VIEW_PITCH_DEG, VIEW_YAW_DEG);
-    viewer.SetViewDistance(VIEW_DISTANCE);
-    viewer.SetSkeletonFilter(VIEW_FILTER);
+    viewer.Create(1280, 720);
+    viewer.SetViewAngles(-25.0f, -35.0f);
+    viewer.SetViewDistance(6.5f);
+    viewer.SetSkeletonFilter(opts.filter);
 
-    auto lastPrintTime = std::chrono::steady_clock::now();
+    bool printedWaiting = false;
+    bool printedReady   = false;
+
     while (viewer.Alive()) {
         client.Poll();
         const auto& joints = client.LatestJoints();
 
-        if (!joints.empty()) viewer.Draw(joints);
-
-        auto now = std::chrono::steady_clock::now();
-        auto dt  = std::chrono::duration_cast<std::chrono::seconds>(now - lastPrintTime).count();
-        if (dt >= 2) {
-            lastPrintTime = now;
-            if (joints.empty()) {
-                std::cout << "[Info] No avatars yet (check Axis Studio is streaming BVH)...\n";
-            } else {
-                std::cout << "\n-- Latest joint world positions (computed via FK) --\n";
-                for (const auto& joint : joints) {
-                    std::cout << "  " << joint.jointName << " [tag " << static_cast<int>(joint.tag) << "]" << std::endl;
-                    std::cout << "    World Pos : (" << joint.worldPos.x << ", " << joint.worldPos.y << ", "
-                              << joint.worldPos.z << ")\n";
-                }
+        if (!joints.empty()) {
+            if (!printedReady) {
+                printedReady = true;
+                std::cout << "Skeleton ready. Drawing fitted MocapApi hierarchy from BVH frames (no raw BVH joints)"
+                          << std::endl;
             }
+            viewer.Draw(joints);
+        } else if (!printedWaiting) {
+            printedWaiting = true;
+            std::cout << "Waiting for BVH frames from Axis Studio..." << std::endl;
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(5));

@@ -27,6 +27,7 @@ bool MocapClient::Initialize() {
 }
 
 void MocapClient::Shutdown() {
+    if (renderSettingsIf_ && renderHandle_ != 0) renderSettingsIf_->DestroyRenderSettings(renderHandle_);
     if (settings_) settings_->DestroySettings(settingsHandle_);
     if (appIf_) {
         appIf_->CloseApplication(appHandle_);
@@ -67,6 +68,13 @@ bool MocapClient::AcquireInterfaces() {
         return false;
     }
 
+    err = MocapApi::MCPGetGenericInterface(MocapApi::IMCPRenderSettings_Version,
+                                           reinterpret_cast<void**>(&renderSettingsIf_));
+    if (err != MocapApi::Error_None || !renderSettingsIf_) {
+        std::cerr << "Failed to get IMCPRenderSettings, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
     return true;
 }
 
@@ -80,6 +88,12 @@ bool MocapClient::CreateApplication() {
     err = settings_->CreateSettings(&settingsHandle_);
     if (err != MocapApi::Error_None) {
         std::cerr << "CreateSettings failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
+    err = renderSettingsIf_->CreateRenderSettings(&renderHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "CreateRenderSettings failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
@@ -99,7 +113,7 @@ bool MocapClient::ConfigureSettings() {
         return false;
     }
 
-    err = settings_->SetSettingsBvhRotation(MocapApi::BvhRotation_XYZ, settingsHandle_);
+    err = settings_->SetSettingsBvhRotation(MocapApi::BvhRotation_YXZ, settingsHandle_);
     if (err != MocapApi::Error_None) {
         std::cerr << "SetSettingsBvhRotation failed, err=" << static_cast<int>(err) << "\n";
         return false;
@@ -117,9 +131,46 @@ bool MocapClient::ConfigureSettings() {
         return false;
     }
 
+    // Align render output with Axis "OPT" coordinate system (Y-up, Z-forward, right-handed, CCW rotations).
+    err = renderSettingsIf_->SetUpVector(MocapApi::UpVector_YAxis, 1, renderHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "SetUpVector failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
+    err = renderSettingsIf_->SetFrontVector(MocapApi::FrontVector_ParityEven, 1, renderHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "SetFrontVector failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
+    err = renderSettingsIf_->SetCoordSystem(MocapApi::CoordSystem_RightHanded, renderHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "SetCoordSystem failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
+    err = renderSettingsIf_->SetRotatingDirection(MocapApi::RotatingDirection_CounterClockwise, renderHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "SetRotatingDirection failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
+    err = renderSettingsIf_->SetUnit(MocapApi::Unit_Centimeter, renderHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "SetUnit failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
     err = appIf_->SetApplicationSettings(settingsHandle_, appHandle_);
     if (err != MocapApi::Error_None) {
         std::cerr << "SetApplicationSettings failed, err=" << static_cast<int>(err) << "\n";
+        return false;
+    }
+
+    err = appIf_->SetApplicationRenderSettings(renderHandle_, appHandle_);
+    if (err != MocapApi::Error_None) {
+        std::cerr << "SetApplicationRenderSettings failed, err=" << static_cast<int>(err) << "\n";
         return false;
     }
 
