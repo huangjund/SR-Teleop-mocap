@@ -26,15 +26,17 @@ def _set_search_paths(paths: Iterable[Path]) -> None:
     """Register mesh search paths for relative URDF resources.
 
     PyBullet keeps only one active additional search path; the last call wins.
-    To maximize compatibility, we set the most likely mesh directories last so
-    their entries take precedence.
+    We add the provided URDF directories first, then fall back to PyBullet's
+    built-in data path so standard assets (like ``plane.urdf``) remain
+    discoverable.
     """
 
-    ordered_paths = [Path(pybullet_data.getDataPath())]
+    ordered_paths: list[Path] = []
     for path in paths:
         ordered_paths.append(path)
         ordered_paths.append(path / "meshes")
         ordered_paths.append(path / "CAD")
+    ordered_paths.append(Path(pybullet_data.getDataPath()))
 
     for path in ordered_paths:
         if path.exists():
@@ -75,7 +77,8 @@ def visualize(args: argparse.Namespace) -> None:
         p.setGravity(0, 0, -9.81, physicsClientId=client)
 
         if not args.no_plane:
-            p.loadURDF("plane.urdf", useFixedBase=True, physicsClientId=client)
+            plane_path = Path(pybullet_data.getDataPath()) / "plane.urdf"
+            p.loadURDF(str(plane_path), useFixedBase=True, physicsClientId=client)
 
         p.resetDebugVisualizerCamera(
             cameraDistance=args.camera_distance,
