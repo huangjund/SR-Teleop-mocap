@@ -87,6 +87,20 @@ Those three angles are printed per joint every 30 frames; the wrists log their f
 4. **Use raw data when needed** – if your robot expects absolute transforms instead of ergonomic angles, feed it the raw
    world-space finger poses from `TeleopMapping::RawFingerPoses()` and compute your own IK or synergy mapping.
 
+## URDF visualization (Python)
+
+The repository includes a lightweight PyBullet script to inspect any URDF in the `urdf/` folder.
+
+```bash
+pip install -r requirements.txt
+python scripts/visualize_urdf.py --urdf urdf/lrmate_with_unijoint_hand.urdf
+```
+
+Useful flags:
+- `--free-base` – allow the base to move (defaults to fixed base)
+- `--no-plane` – disable the ground plane
+- `--realtime` – run PyBullet in realtime instead of fixed stepping
+
 ## Skeleton scaling and body-length data
 
 You do **not** need to supply custom body-length parameters when pulling the MocapApi skeleton. Each avatar already carries the segment lengths through the joints' default local positions and bind pose that you can query from `IMCPJoint`/`IMCPBodyPart`. If you want to inspect or log those values, fetch the joint list from `IMCPAvatar`, then read the default local positions for each handle (e.g., via `GetJointDefaultLocalPosition`) to derive per-bone lengths; the BVH stream viewer already captures these local positions when it builds `JointSample` structures.
