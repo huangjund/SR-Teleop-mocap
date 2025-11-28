@@ -25,7 +25,9 @@ English Documentation : https://mocap-api.noitom.com/mocap_api_en.html
 Build the standalone BVH stream viewer to subscribe to Axis Studio BVH output, fit each frame to the
 MocapApi skeleton, and visualize the hierarchy. The viewer never renders the Axis BVH hierarchy
 directly; every frame is re-targeted through `IMCPAvatar`/`IMCPJoint` so the drawn skeleton always
-reflects what MocapApi reports.
+reflects what MocapApi reports. The client requests YXZ BVH rotation order and configures render
+settings for the Axis “OPT” coordinate system (Y-up, +Z forward, right-handed, counter-clockwise
+rotations).
 
 ```
 cmake -S . -B build

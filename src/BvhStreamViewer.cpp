@@ -57,8 +57,8 @@ int main(int argc, char** argv) {
                       ? "full"
                       : (opts.filter == SkeletonViewer::SkeletonFilter::BodyOnly ? "body" : "hands"))
               << "\n";
-    std::cout << "Connecting to Axis Studio BVH stream; all visualization will use MocapApi joints "
-                 "reported via IMCPAvatar/IMCPJoint.\n\n";
+    std::cout << "Connecting to Axis Studio BVH stream (OPT coord system, YXZ rotation order); all "
+                 "visualization will use MocapApi joints reported via IMCPAvatar/IMCPJoint.\n\n";
 
     MocapClient client(opts.serverIp, opts.port);
     if (!client.Initialize()) return 1;

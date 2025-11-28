@@ -31,9 +31,11 @@ private:
     MocapApi::IMCPAvatar*      avatarIf_ = nullptr;
     MocapApi::IMCPJoint*       jointIf_  = nullptr;
     MocapApi::IMCPBodyPart*    bodyPart_ = nullptr;
+    MocapApi::IMCPRenderSettings* renderSettingsIf_ = nullptr;
 
     MocapApi::MCPApplicationHandle_t appHandle_      = 0;
     MocapApi::MCPSettingsHandle_t    settingsHandle_ = 0;
+    MocapApi::MCPRenderSettingsHandle_t renderHandle_ = 0;
 
     std::vector<JointSample> latestJoints_;
 };
