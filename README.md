@@ -57,6 +57,50 @@ Run it against the Axis Studio BVH endpoint (same defaults as the viewer):
 ./build/mocap_teleop --server 127.0.0.1 --port 7012
 ```
 
+### Step 1: C++ IK to Fanuc joint angles, Python visualization
+
+For the arm-only milestone (with optional dexterous hand streaming), the
+pipeline now mirrors the production flow:
+
+1. The C++ teleop client ingests the BVH stream, extracts each wrist pose, and
+   runs FastIK to compute Fanuc arm joint angles (no hand/gripper).
+2. The resulting arm joint vectors are broadcast over UDP as newline-delimited
+   CSV to a configurable destination. You can choose to stream `left`,
+   `right`, or both arms.
+3. Ergonomic finger angles are retargeted to a five-finger dexterous hand and
+   streamed over a second UDP channel (default port `15001`).
+4. The Python helper listens for those joint vectors and drives two URDF arms
+   (and their attached hand joints) in PyBullet directly—no IK on the Python
+   side—so you can verify the FastIK output and hand retargeting in realtime.
+
+Each UDP packet looks like:
+
+```
+frame,<frame_index>
+joint,<side>,<arm_joint0>,...,<arm_joint5>
+hand,<side>,<hand_joint0>,...
+```
+
+Usage:
+
+```bash
+# Terminal 1: stream joint angles from BVH + FastIK (default streams both arms)
+./build/mocap_teleop --server 127.0.0.1 --port 7012 --out-ip 127.0.0.1 --out-port 15000 --hand-port 15001
+
+# Terminal 2: visualize both arms in PyBullet
+python scripts/udp_wrist_to_ik.py --urdf urdf/lrmate_with_unijoint_hand.urdf --listen-port 15000 --listen-hand-port 15001
+```
+
+Override `--out-ip/--out-port` on the C++ side to target a different listener,
+or add `--no-udp` if you only need console logging. Use `--no-hand-udp` on the
+C++ side or `--no-hand` on the Python side to disable dexterous-hand streaming.
+
+To stream/visualize just one arm, add a comma-separated `--sides` filter to the
+C++ teleop program (e.g., `--sides left` or `--sides right`) and pass the same
+flag to the Python helper. You can also offset the default arm bases with
+`--left-base-xyz/--left-base-rpy` and `--right-base-xyz/--right-base-rpy` when
+running the visualizer.
+
 ### What the stream provides
 - **Wrist 6D poses** – both wrists are reported in world space (OPT basis, Y-up, +Z forward) as position plus orientation
   quaternions coming directly from MocapApi’s computed joint transforms.
@@ -83,7 +127,9 @@ Those three angles are printed per joint every 30 frames; the wrists log their f
    offsets, add them after transforming the pose into the robot frame.
 3. **Map ergonomic angles to actuators** – for each robot finger joint, choose the corresponding MocapApi joint and apply the
    flexion/abduction/twist values. Clamp or scale to the robot’s mechanical limits; for coupled joints, blend multiple human
-   joints to drive a single actuator.
+   joints to drive a single actuator. Update the mapping logic in `HandRetargeter::Retarget`
+   inside `src/teleop_main.cpp` to change how human finger motion drives your
+   dexterous hand.
 4. **Use raw data when needed** – if your robot expects absolute transforms instead of ergonomic angles, feed it the raw
    world-space finger poses from `TeleopMapping::RawFingerPoses()` and compute your own IK or synergy mapping.
 

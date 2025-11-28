@@ -46,4 +46,8 @@ target_link_libraries(mocap_teleop PRIVATE
     MocapApi
 )
 
+if (WIN32)
+    target_link_libraries(mocap_teleop PRIVATE Ws2_32)
+endif()
+
 target_compile_features(mocap_teleop PRIVATE cxx_std_17)
