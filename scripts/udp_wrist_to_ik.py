@@ -47,21 +47,33 @@ def _set_search_paths(paths: Iterable[Path]) -> None:
             p.setAdditionalSearchPath(str(path))
 
 
-def _parse_joint_packet(packet: bytes) -> tuple[Dict[str, list[float]], Dict[str, list[float]]]:
+def _parse_joint_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Dict[str, list[float]]]:
     """Decode arm and dexterous-hand datagrams from the C++ teleop sender."""
 
     decoded = packet.decode("utf-8", errors="ignore")
     lines = [line.strip() for line in decoded.splitlines() if line.strip()]
 
+    frame_idx: int | None = None
     arm_targets: Dict[str, list[float]] = {}
     hand_targets: Dict[str, list[float]] = {}
-    for line in lines[1:]:
-        parts = line.split(",")
+
+    for line in lines:
+        parts = [part.strip() for part in line.split(",") if part.strip()]
+        if len(parts) < 2:
+            continue
+
+        prefix = parts[0].lower()
+        if prefix == "frame":
+            try:
+                frame_idx = int(parts[1])
+            except ValueError:
+                frame_idx = None
+            continue
+
         if len(parts) < 3:
             continue
 
-        prefix = parts[0].strip().lower()
-        side = parts[1].strip().lower()
+        side = parts[1].lower()
         try:
             angles = [float(value) for value in parts[2:]]
         except ValueError:
@@ -72,7 +84,7 @@ def _parse_joint_packet(packet: bytes) -> tuple[Dict[str, list[float]], Dict[str
         elif prefix == "hand":
             hand_targets[side] = angles
 
-    return arm_targets, hand_targets
+    return frame_idx, arm_targets, hand_targets
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -193,30 +205,35 @@ def visualize_stream(args: argparse.Namespace) -> None:
         )
 
         while True:
+            packets: list[tuple[bytes, bool]] = []
+
             try:
                 packet, _ = sock.recvfrom(4096)
+                packets.append((packet, False))
             except BlockingIOError:
-                packet = b""
-
-            if packet:
-                arm_cmds, _ = _parse_joint_packet(packet)
-                for side, instance in arms.items():
-                    if side not in arm_cmds:
-                        continue
-
-                    angles = arm_cmds[side]
-                    if len(angles) < len(instance.arm_joint_indices):
-                        angles = angles + [0.0] * (len(instance.arm_joint_indices) - len(angles))
-                    instance.arm_targets = angles[: len(instance.arm_joint_indices)]
+                pass
 
             if hand_sock is not None:
                 try:
                     hand_packet, _ = hand_sock.recvfrom(4096)
+                    packets.append((hand_packet, True))
                 except BlockingIOError:
-                    hand_packet = b""
+                    pass
 
-                if hand_packet:
-                    _, hand_cmds = _parse_joint_packet(hand_packet)
+            for packet, is_hand_packet in packets:
+                frame_idx, arm_cmds, hand_cmds = _parse_joint_packet(packet)
+
+                if arm_cmds:
+                    for side, instance in arms.items():
+                        if side not in arm_cmds:
+                            continue
+
+                        angles = arm_cmds[side]
+                        if len(angles) < len(instance.arm_joint_indices):
+                            angles = angles + [0.0] * (len(instance.arm_joint_indices) - len(angles))
+                        instance.arm_targets = angles[: len(instance.arm_joint_indices)]
+
+                if hand_sock is not None and hand_cmds:
                     for side, instance in arms.items():
                         if side not in hand_cmds:
                             continue
@@ -225,6 +242,9 @@ def visualize_stream(args: argparse.Namespace) -> None:
                         if len(angles) < len(instance.hand_joint_indices):
                             angles = angles + [0.0] * (len(instance.hand_joint_indices) - len(angles))
                         instance.hand_targets = angles[: len(instance.hand_joint_indices)]
+
+                if frame_idx is not None:
+                    print(f"Updated targets from frame {frame_idx} ({'hand' if is_hand_packet else 'arm'} stream)")
 
             for arm in arms.values():
                 for idx, joint_id in enumerate(arm.arm_joint_indices):
