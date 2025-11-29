@@ -66,7 +66,10 @@ def stream_fake_packets(args: argparse.Namespace) -> None:
     client = p.connect(p.GUI)
     try:
         p.resetDebugVisualizerCamera(cameraDistance=2.5, cameraYaw=50, cameraPitch=-30, cameraTargetPosition=[0, 0, 0])
-        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+        # Keep the PyBullet GUI controls enabled so the debug sliders remain visible.
+        # Disabling the GUI hides the slider pane, which led to a blank window for some
+        # users when running this tool alongside ``udp_wrist_to_ik.py``.
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
         slider_ids = _create_sliders(args.sides, joint_limit=args.joint_limit)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
