@@ -2,21 +2,19 @@
 
 This utility reproduces the UDP packet format emitted by ``mocap_teleop`` so
 you can drive the PyBullet visualizer (``scripts/udp_wrist_to_ik.py``) without
-Axis Studio or the C++ teleop binary. Use the PyBullet debug sliders to update
-joint angles in real time; packets are streamed continuously to the configured
-UDP endpoint.
+Axis Studio or the C++ teleop binary. A lightweight Tkinter UI exposes sliders
+for joint angles and streams packets continuously to the configured UDP
+endpoint.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
 import socket
 import sys
 import time
+import tkinter as tk
 from typing import Dict, Iterable, Sequence
-
-import pybullet as p
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -29,78 +27,106 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=30.0,
         help="Streaming rate in Hz (controls how often slider values are broadcast)",
     )
-    parser.add_argument("--sides", nargs="+", choices=["left", "right"], default=["left", "right"], help="Arms to stream")
+    parser.add_argument(
+        "--sides", nargs="+", choices=["left", "right"], default=["left", "right"], help="Arms to stream"
+    )
     parser.add_argument(
         "--joint-limit",
         type=float,
-        default=math.pi,
+        default=3.141592653589793,
         help="Symmetric slider limit in radians for each joint (default: +/-pi)",
     )
     return parser.parse_args(argv)
 
 
-def _create_sliders(sides: Iterable[str], *, joint_limit: float) -> Dict[str, list[int]]:
-    slider_ids: Dict[str, list[int]] = {}
+def _create_sliders(root: tk.Tk, sides: Iterable[str], *, joint_limit: float) -> Dict[str, list[tk.Scale]]:
+    sliders: Dict[str, list[tk.Scale]] = {}
+
     for side in sides:
-        slider_ids[side] = []
+        frame = tk.LabelFrame(root, text=f"{side.capitalize()} arm")
+        frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+
+        sliders[side] = []
         for idx in range(6):
-            slider_ids[side].append(
-                p.addUserDebugParameter(
-                    f"{side} joint {idx + 1}",
-                    -joint_limit,
-                    joint_limit,
-                    0.0,
-                )
+            label = tk.Label(frame, text=f"Joint {idx + 1}")
+            label.grid(row=idx, column=0, sticky=tk.W, padx=6, pady=2)
+
+            scale = tk.Scale(
+                frame,
+                from_=-joint_limit,
+                to=joint_limit,
+                resolution=0.01,
+                orient=tk.HORIZONTAL,
+                length=280,
             )
-    return slider_ids
+            scale.grid(row=idx, column=1, sticky=tk.EW, padx=6, pady=2)
+            sliders[side].append(scale)
+
+        frame.columnconfigure(1, weight=1)
+
+    return sliders
 
 
-def _gather_angles(slider_ids: Dict[str, list[int]]) -> Dict[str, list[float]]:
+def _gather_angles(sliders: Dict[str, list[tk.Scale]]) -> Dict[str, list[float]]:
     angles: Dict[str, list[float]] = {}
-    for side, params in slider_ids.items():
-        angles[side] = [float(p.readUserDebugParameter(param_id)) for param_id in params]
+    for side, params in sliders.items():
+        angles[side] = [float(scale.get()) for scale in params]
     return angles
 
 
 def stream_fake_packets(args: argparse.Namespace) -> None:
-    client = p.connect(p.GUI)
+    root = tk.Tk()
+    root.title("Fake teleop slider")
+
+    sliders = _create_sliders(root, args.sides, joint_limit=args.joint_limit)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    destination = (args.dest_ip, args.dest_port)
+
+    print(
+        "Streaming fake teleop packets to "
+        f"{args.dest_ip}:{args.dest_port} for sides: {', '.join(args.sides)}. "
+        "Close the window or press Ctrl+C to stop."
+    )
+
+    running = True
+    frame_idx = 0
+    period_ms = int(1000.0 / args.rate_hz) if args.rate_hz > 0 else 0
+
+    def on_close() -> None:
+        nonlocal running
+        running = False
+        root.destroy()
+
+    def send_packet() -> None:
+        nonlocal frame_idx
+        if not running:
+            return
+
+        angles = _gather_angles(sliders)
+        lines = [f"frame,{frame_idx}"]
+        for side in args.sides:
+            side_angles = angles.get(side, [])
+            formatted = ",".join(f"{angle:.6f}" for angle in side_angles)
+            lines.append(f"joint,{side},{formatted}")
+
+        payload = "\n".join(lines)
+        sock.sendto(payload.encode("utf-8"), destination)
+
+        frame_idx += 1
+        if period_ms > 0:
+            root.after(period_ms, send_packet)
+        else:
+            root.after_idle(send_packet)
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.after(0, send_packet)
+
     try:
-        p.resetDebugVisualizerCamera(cameraDistance=2.5, cameraYaw=50, cameraPitch=-30, cameraTargetPosition=[0, 0, 0])
-        # Keep the PyBullet GUI controls enabled so the debug sliders remain visible.
-        # Disabling the GUI hides the slider pane, which led to a blank window for some
-        # users when running this tool alongside ``udp_wrist_to_ik.py``.
-        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
-        slider_ids = _create_sliders(args.sides, joint_limit=args.joint_limit)
-
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        destination = (args.dest_ip, args.dest_port)
-
-        print(
-            "Streaming fake teleop packets to "
-            f"{args.dest_ip}:{args.dest_port} for sides: {', '.join(args.sides)}. "
-            "Close the PyBullet window or press Ctrl+C to stop."
-        )
-
-        frame_idx = 0
-        period = 1.0 / args.rate_hz if args.rate_hz > 0 else 0.0
-        while True:
-            angles = _gather_angles(slider_ids)
-            lines = [f"frame,{frame_idx}"]
-            for side in args.sides:
-                side_angles = angles.get(side, [])
-                formatted = ",".join(f"{angle:.6f}" for angle in side_angles)
-                lines.append(f"joint,{side},{formatted}")
-
-            payload = "\n".join(lines)
-            sock.sendto(payload.encode("utf-8"), destination)
-
-            frame_idx += 1
-            if period > 0:
-                time.sleep(period)
+        root.mainloop()
     except KeyboardInterrupt:
         print("Stopping fake teleop sender.")
-    finally:
-        p.disconnect(physicsClientId=client)
+        on_close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
