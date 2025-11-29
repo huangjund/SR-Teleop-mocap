@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import socket
+import math
 import sys
 import time
 from dataclasses import dataclass
@@ -105,9 +106,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Which arms to spawn and drive (default: both)",
     )
     parser.add_argument("--left-base-xyz", type=float, nargs="*", default=(-0.6, 0.3, 0.0), help="Left base position")
-    parser.add_argument("--left-base-rpy", type=float, nargs="*", default=(0.0, 0.0, 0.0), help="Left base roll/pitch/yaw")
+    parser.add_argument("--left-base-rpy", type=float, nargs="*", default=(0.0, 0.0, -1.57), help="Left base roll/pitch/yaw")
     parser.add_argument("--right-base-xyz", type=float, nargs="*", default=(0.6, 0.3, 0.0), help="Right base position")
-    parser.add_argument("--right-base-rpy", type=float, nargs="*", default=(0.0, 0.0, 0.0), help="Right base roll/pitch/yaw")
+    parser.add_argument("--right-base-rpy", type=float, nargs="*", default=(0.0, 0.0, -1.57), help="Right base roll/pitch/yaw")
     parser.add_argument("--no-plane", action="store_true", help="Do not add a ground plane")
     return parser.parse_args(argv)
 
@@ -228,7 +229,7 @@ def visualize_stream(args: argparse.Namespace) -> None:
                         if side not in arm_cmds:
                             continue
 
-                        angles = arm_cmds[side]
+                        angles = [math.radians(value) for value in arm_cmds[side]]
                         if len(angles) < len(instance.arm_joint_indices):
                             angles = angles + [0.0] * (len(instance.arm_joint_indices) - len(angles))
                         instance.arm_targets = angles[: len(instance.arm_joint_indices)]
@@ -238,7 +239,7 @@ def visualize_stream(args: argparse.Namespace) -> None:
                         if side not in hand_cmds:
                             continue
 
-                        angles = hand_cmds[side]
+                        angles = [math.radians(value) for value in hand_cmds[side]]
                         if len(angles) < len(instance.hand_joint_indices):
                             angles = angles + [0.0] * (len(instance.hand_joint_indices) - len(angles))
                         instance.hand_targets = angles[: len(instance.hand_joint_indices)]

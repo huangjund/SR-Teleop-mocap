@@ -62,6 +62,8 @@ Run it against the Axis Studio BVH endpoint (same defaults as the viewer):
 For the arm-only milestone (with optional dexterous hand streaming), the
 pipeline now mirrors the production flow:
 
+
+
 1. The C++ teleop client ingests the BVH stream, extracts each wrist pose, and
    runs FastIK to compute Fanuc arm joint angles (no hand/gripper).
 2. The resulting arm joint vectors are broadcast over UDP as newline-delimited
@@ -80,6 +82,12 @@ frame,<frame_index>
 joint,<side>,<arm_joint0>,...,<arm_joint5>
 hand,<side>,<hand_joint0>,...
 ```
+
+
+All joint angles in these streams are expressed in **degrees**. The provided
+PyBullet visualizer (`scripts/udp_wrist_to_ik.py`) converts them to radians
+before driving the URDF model.
+
 
 Usage:
 
