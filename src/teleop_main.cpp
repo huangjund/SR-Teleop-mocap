@@ -32,7 +32,7 @@ struct Options {
     uint16_t    outPort  = 15000;
     uint16_t    handPort = 15001;
     bool        enableUdp{true};
-    bool        enableHandUdp{false};
+    bool        enableHandUdp{true};
     std::vector<std::string> sides{"left", "right"};
 };
 

@@ -33,7 +33,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--joint-limit",
         type=float,
-        default=3.141592653589793,
+        default=180,
         help="Symmetric slider limit in radians for each joint (default: +/-pi)",
     )
     return parser.parse_args(argv)
