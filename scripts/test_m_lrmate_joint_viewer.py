@@ -3,9 +3,44 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Dict, List
 
 import pybullet as p
 import pybullet_data
+
+
+def _draw_frame(
+    name: str,
+    position: List[float],
+    orientation: List[float],
+    client: int,
+    cache: Dict[str, List[int]],
+    length: float = 0.15,
+) -> None:
+    """Draw a triad at ``position`` with axes aligned to ``orientation``."""
+
+    rot = p.getMatrixFromQuaternion(orientation)
+    axes = [
+        (rot[0], rot[3], rot[6]),  # x
+        (rot[1], rot[4], rot[7]),  # y
+        (rot[2], rot[5], rot[8]),  # z
+    ]
+    colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
+    ids = cache.get(name, [None, None, None])
+
+    for i, axis in enumerate(axes):
+        end = [position[j] + length * axis[j] for j in range(3)]
+        ids[i] = p.addUserDebugLine(
+            position,
+            end,
+            colors[i],
+            lineWidth=2.0,
+            lifeTime=0,
+            replaceItemUniqueId=ids[i] if ids[i] is not None else -1,
+            physicsClientId=client,
+        )
+
+    cache[name] = ids
 
 
 def main() -> None:
@@ -40,6 +75,8 @@ def main() -> None:
                 movable.append((i, info[1].decode()))
 
         text_id = None
+        frame_cache: Dict[str, List[int]] = {}
+
         print(f"Loaded {urdf_path.name} with {len(movable)} controllable joints.")
         while True:
             coords = []
@@ -55,6 +92,25 @@ def main() -> None:
                 )
                 pos = p.getJointState(robot_id, joint_index, physicsClientId=client)[0]
                 coords.append(f"{name}:{pos:.3f}")
+
+            base_pos, base_orn = p.getBasePositionAndOrientation(robot_id, physicsClientId=client)
+            _draw_frame("base", base_pos, base_orn, client, frame_cache)
+
+            for link_index in range(p.getNumJoints(robot_id, physicsClientId=client)):
+                link_state = p.getLinkState(
+                    robot_id,
+                    link_index,
+                    computeForwardKinematics=True,
+                    physicsClientId=client,
+                )
+                if link_state is not None:
+                    _draw_frame(
+                        f"joint_{link_index}",
+                        list(link_state[4]),
+                        list(link_state[5]),
+                        client,
+                        frame_cache,
+                    )
 
             if text_id is not None:
                 p.removeUserDebugItem(text_id, physicsClientId=client)
