@@ -16,16 +16,21 @@ Keyboard controls (matching the C++ teleop pipeline):
 from __future__ import annotations
 
 import argparse
+import platform
 import select
 import socket
 import sys
-import termios
 import time
-import tty
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, Sequence
+
+if platform.system() == "Windows":
+    import msvcrt
+else:
+    import termios
+    import tty
 
 import numpy as np
 import pinocchio as pin
@@ -161,6 +166,15 @@ def _format_joint_packet(frame_idx: int, sides: Iterable[str], arm_deg: Dict[str
 
 @contextmanager
 def raw_terminal_mode() -> None:
+    """Context manager that enables non-blocking keyboard polling cross-platform."""
+
+    if platform.system() == "Windows":
+        # Windows console reads are already unbuffered when using ``msvcrt``.
+        try:
+            yield
+        finally:
+            return
+
     old_attrs = termios.tcgetattr(sys.stdin)
     tty.setcbreak(sys.stdin.fileno())
     try:
@@ -173,14 +187,22 @@ def _poll_keys() -> tuple[bool, bool]:
     hold_k = False
     trigger_l = False
 
-    rlist, _, _ = select.select([sys.stdin], [], [], 0)
-    while rlist:
-        ch = sys.stdin.read(1)
-        if ch.lower() == "k":
-            hold_k = True
-        elif ch.lower() == "l":
-            trigger_l = True
+    if platform.system() == "Windows":
+        while msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch.lower() == "k":
+                hold_k = True
+            elif ch.lower() == "l":
+                trigger_l = True
+    else:
         rlist, _, _ = select.select([sys.stdin], [], [], 0)
+        while rlist:
+            ch = sys.stdin.read(1)
+            if ch.lower() == "k":
+                hold_k = True
+            elif ch.lower() == "l":
+                trigger_l = True
+            rlist, _, _ = select.select([sys.stdin], [], [], 0)
 
     return hold_k, trigger_l
 
