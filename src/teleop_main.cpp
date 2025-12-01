@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -15,6 +16,7 @@
 #ifdef _WIN32
 #    include <WinSock2.h>
 #    include <WS2tcpip.h>
+#    include <Windows.h>
 #    include <conio.h>
 #else
 #    include <arpa/inet.h>
@@ -51,6 +53,62 @@ struct Options {
     std::string            urdfPath{"urdf/lrmate_without_hand.urdf"};
     std::string            endEffectorFrame{"wrist"};
 };
+
+bool FileExists(const std::string& path) {
+    std::ifstream f(path.c_str());
+    return f.good();
+}
+
+std::string JoinPath(const std::string& base, const std::string& relative) {
+    if (base.empty()) return relative;
+    const char last = base.back();
+    const bool hasSep = (last == '/' || last == '\\');
+    if (hasSep) return base + relative;
+    return base + '/' + relative;
+}
+
+std::string ExecutableDir(const char* argv0) {
+#ifdef _WIN32
+    char buffer[MAX_PATH]{0};
+    const DWORD len = GetModuleFileNameA(nullptr, buffer, static_cast<DWORD>(sizeof(buffer)));
+    if (len == 0 || len >= sizeof(buffer)) return {};
+    std::string path(buffer, buffer + len);
+    const size_t pos = path.find_last_of("/\\");
+    return (pos == std::string::npos) ? std::string{} : path.substr(0, pos);
+#else
+    char        buffer[4096];
+    const ssize_t len = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    if (len <= 0 || len >= static_cast<ssize_t>(sizeof(buffer))) return {};
+    buffer[len] = '\0';
+    std::string path(buffer);
+    const size_t pos = path.find_last_of('/');
+    return (pos == std::string::npos) ? std::string{} : path.substr(0, pos);
+#endif
+}
+
+bool IsAbsolutePath(const std::string& path) {
+    if (path.size() > 1 && std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':') return true;  // Windows drive
+    return !path.empty() && (path[0] == '/' || path[0] == '\\');
+}
+
+std::string ResolveUrdfPath(const std::string& userPath, const char* argv0) {
+    std::vector<std::string> candidates;
+    candidates.push_back(userPath);
+
+    if (!IsAbsolutePath(userPath)) {
+        const std::string exeDir = ExecutableDir(argv0);
+        if (!exeDir.empty()) {
+            candidates.push_back(JoinPath(exeDir, userPath));
+            candidates.push_back(JoinPath(JoinPath(exeDir, ".."), userPath));
+            candidates.push_back(JoinPath(JoinPath(exeDir, "../.."), userPath));
+        }
+    }
+
+    for (const std::string& candidate : candidates) {
+        if (!candidate.empty() && FileExists(candidate)) return candidate;
+    }
+    return userPath;
+}
 
 void PrintUsage(const char* exeName) {
     std::cout << "Usage: " << exeName << " [--server <ip>] [--port <udp_port>]\\n";
@@ -465,7 +523,17 @@ int main(int argc, char** argv) {
     if (!client.Initialize()) return 1;
 
     TeleopMapping mapper;
-    PinocchioIkSolver ikSolver(opts.urdfPath, opts.endEffectorFrame, 6);  // Fanuc arm has 6 joints
+    const std::string resolvedUrdf = ResolveUrdfPath(opts.urdfPath, argv[0]);
+    if (!resolvedUrdf.empty() && resolvedUrdf != opts.urdfPath) {
+        std::cout << "[teleop] Using resolved URDF path: " << resolvedUrdf << std::endl;
+    }
+    if (!FileExists(resolvedUrdf)) {
+        std::cerr << "[teleop] URDF not found at '" << resolvedUrdf
+                  << "'. Verify --urdf points to a valid file relative to the repo root (urdf/...) or provide an absolute path."
+                  << std::endl;
+    }
+
+    PinocchioIkSolver ikSolver(resolvedUrdf, opts.endEffectorFrame, 6);  // Fanuc arm has 6 joints
     HandRetargeter    handRetargeter;
     size_t            frame          = 0;
     bool              printedWaiting = false;
