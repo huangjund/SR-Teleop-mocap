@@ -90,7 +90,7 @@ def _parse_joint_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
-    default_urdf = repo_root / "urdf" / "lrmate_with_unijoint_hand.urdf"
+    default_urdf = repo_root / "urdf" / "M_lrmate_with_unijoint_hand.urdf"
 
     parser = argparse.ArgumentParser(description="Visualize Fanuc joint commands via UDP")
     parser.add_argument("--urdf", type=Path, default=default_urdf, help="Path to the URDF file to load")

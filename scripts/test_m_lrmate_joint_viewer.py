@@ -45,7 +45,7 @@ def _draw_frame(
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    urdf_path = repo_root / "urdf" / "M_lrmate_with_unijoint_hand.urdf"
+    urdf_path = repo_root / "urdf" / "M_lrmate_with_unijoint_hand.urdf"#"lrmate_without_hand.urdf"
 
     client = p.connect(p.GUI)
     try:
