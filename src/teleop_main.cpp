@@ -5,21 +5,40 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _WIN32
 #    include <WinSock2.h>
 #    include <WS2tcpip.h>
+#    include <Windows.h>
+#    include <conio.h>
 #else
 #    include <arpa/inet.h>
 #    include <netinet/in.h>
 #    include <sys/socket.h>
+#    include <sys/select.h>
+#    include <termios.h>
 #    include <unistd.h>
 #endif
+
+#include <Eigen/Dense>
+#include <boost/dll/runtime_symbol_info.hpp>
+#include <boost/filesystem.hpp>
+#include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio/algorithm/jacobian.hpp>
+#include <pinocchio/algorithm/frames.hpp>
+#include <pinocchio/multibody/model.hpp>
+#include <pinocchio/multibody/data.hpp>
+#include <pinocchio/parsers/urdf.hpp>
+#include <pinocchio/spatial/se3.hpp>
 
 #include "MocapClient.h"
 #include "TeleopMapping.h"
@@ -34,7 +53,64 @@ struct Options {
     bool        enableUdp{true};
     bool        enableHandUdp{true};
     std::vector<std::string> sides{"left", "right"};
+    std::string            urdfPath{"urdf/lrmate_without_hand.urdf"};
+    std::string            endEffectorFrame{"wrist"};
 };
+
+bool FileExists(const std::string& path) {
+    if (path.empty()) return false;
+    std::error_code ec{};
+    return std::filesystem::exists(path, ec);
+}
+
+std::string ExecutableDir() {
+    try {
+        return boost::dll::program_location().parent_path().string();
+    } catch (...) {
+        return {};
+    }
+}
+
+std::string ResolveUrdfPath(const std::string& userPath, const char* /*argv0*/) {
+    namespace bfs = boost::filesystem;
+
+    std::vector<bfs::path> candidates;
+    const bfs::path        userPathFs(userPath);
+
+    if (!userPath.empty()) {
+        candidates.push_back(userPathFs);
+    }
+
+    if (!userPathFs.is_absolute()) {
+        candidates.push_back(bfs::absolute(userPathFs));
+
+        try {
+            const bfs::path exeDir = boost::dll::program_location().parent_path();
+            candidates.push_back(exeDir / userPathFs);
+            candidates.push_back(exeDir / ".." / userPathFs);
+            candidates.push_back(exeDir / ".." / ".." / userPathFs);
+        } catch (...) {
+        }
+
+#ifdef PROJECT_SOURCE_DIR
+        const bfs::path sourceDir(PROJECT_SOURCE_DIR);
+        candidates.push_back(sourceDir / userPathFs);
+        candidates.push_back(sourceDir / ".." / userPathFs);
+#endif
+    }
+
+    for (const bfs::path& candidate : candidates) {
+        boost::system::error_code ec{};
+        if (!candidate.empty() && bfs::exists(candidate, ec)) {
+            boost::system::error_code canonEc{};
+            const bfs::path canonical = bfs::canonical(candidate, canonEc);
+            return canonEc ? candidate.string() : canonical.string();
+        }
+    }
+
+    // Fall back to the original user string if nothing else is found.
+    return userPath;
+}
 
 void PrintUsage(const char* exeName) {
     std::cout << "Usage: " << exeName << " [--server <ip>] [--port <udp_port>]\\n";
@@ -46,6 +122,8 @@ void PrintUsage(const char* exeName) {
     std::cout << "  --sides   Comma-separated list of arms to stream: left,right (default both)\\n";
     std::cout << "  --no-udp  Disable joint-angle UDP streaming\\n";
     std::cout << "  --no-hand-udp Disable dexterous-hand UDP streaming\\n";
+    std::cout << "  --urdf    URDF path for the Fanuc arm (default urdf/lrmate_without_hand.urdf)\\n";
+    std::cout << "  --ee-frame End-effector frame name in the URDF (default wrist)\\n";
 }
 
 Options ParseArgs(int argc, char** argv) {
@@ -82,6 +160,10 @@ Options ParseArgs(int argc, char** argv) {
             opts.enableUdp = false;
         } else if (arg == "--no-hand-udp") {
             opts.enableHandUdp = false;
+        } else if (arg == "--urdf" && i + 1 < argc) {
+            opts.urdfPath = argv[++i];
+        } else if (arg == "--ee-frame" && i + 1 < argc) {
+            opts.endEffectorFrame = argv[++i];
         } else if (arg == "--help" || arg == "-h") {
             PrintUsage(argv[0]);
             std::exit(0);
@@ -95,51 +177,150 @@ struct JointCommand {
     std::vector<float> joints;
 };
 
-// Placeholder for the FastIK integration; right now we use a simple geometric
-// decomposition so the pipeline from BVH -> IK -> UDP -> visualizer is wired.
-class FastIkSolver {
+class TerminalModeGuard {
 public:
-    explicit FastIkSolver(size_t dof) : dof_(dof) {}
+    TerminalModeGuard() {
+#ifndef _WIN32
+        if (tcgetattr(STDIN_FILENO, &original_) == 0) {
+            termios raw = original_;
+            raw.c_lflag &= static_cast<unsigned>(~(ICANON | ECHO));
+            raw.c_cc[VMIN]  = 0;
+            raw.c_cc[VTIME] = 0;
+            tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+            engaged_ = true;
+        }
+#endif
+    }
 
-    std::vector<float> Solve(const WristPose& wrist) const {
-        // Extract a basic yaw-pitch-roll from the wrist quaternion to populate the
-        // first three joints, then use the wrist position to drive the remaining
-        // translational DOFs. Replace this with the actual FastIK solution for
-        // your Fanuc when available.
-        const float xx = wrist.orientation.x * wrist.orientation.x;
-        const float yy = wrist.orientation.y * wrist.orientation.y;
-        const float zz = wrist.orientation.z * wrist.orientation.z;
-        const float xy = wrist.orientation.x * wrist.orientation.y;
-        const float xz = wrist.orientation.x * wrist.orientation.z;
-        const float yz = wrist.orientation.y * wrist.orientation.z;
-        const float wx = wrist.orientation.w * wrist.orientation.x;
-        const float wy = wrist.orientation.w * wrist.orientation.y;
-        const float wz = wrist.orientation.w * wrist.orientation.z;
-
-        const float m02 = 2.0f * (xz + wy);
-        const float m12 = 2.0f * (yz - wx);
-        const float m10 = 2.0f * (xy + wz);
-        const float m11 = 1.0f - 2.0f * (xx + zz);
-        const float m22 = 1.0f - 2.0f * (xx + yy);
-
-        const float pitch = -std::asin(std::clamp(m12, -1.0f, 1.0f));
-        const float cp    = std::cos(pitch);
-
-        const float yaw  = (std::fabs(cp) > 1e-4f) ? std::atan2(m02, m22) : 0.0f;
-        const float roll = (std::fabs(cp) > 1e-4f) ? std::atan2(m10, m11) : 0.0f;
-
-        std::vector<float> joints(dof_, 0.0f);
-        if (dof_ > 0) joints[0] = roll;
-        if (dof_ > 1) joints[1] = pitch;
-        if (dof_ > 2) joints[2] = yaw;
-        if (dof_ > 3) joints[3] = wrist.position.x;
-        if (dof_ > 4) joints[4] = wrist.position.y;
-        if (dof_ > 5) joints[5] = wrist.position.z;
-        return joints;
+    ~TerminalModeGuard() {
+#ifndef _WIN32
+        if (engaged_) { tcsetattr(STDIN_FILENO, TCSANOW, &original_); }
+#endif
     }
 
 private:
-    size_t dof_{0};
+#ifndef _WIN32
+    termios original_{};
+    bool    engaged_{false};
+#endif
+};
+
+struct KeyPollResult {
+    bool holdK{false};
+    bool triggerL{false};
+};
+
+KeyPollResult PollKeys() {
+    KeyPollResult result{};
+#ifdef _WIN32
+    while (_kbhit()) {
+        const int ch = _getch();
+        if (ch == 'k' || ch == 'K') result.holdK = true;
+        if (ch == 'l' || ch == 'L') result.triggerL = true;
+    }
+#else
+    fd_set set;
+    timeval tv{};
+    FD_ZERO(&set);
+    FD_SET(STDIN_FILENO, &set);
+
+    while (select(STDIN_FILENO + 1, &set, nullptr, nullptr, &tv) > 0) {
+        char buffer = 0;
+        const ssize_t bytes = ::read(STDIN_FILENO, &buffer, 1);
+        if (bytes <= 0) break;
+        if (buffer == 'k' || buffer == 'K') result.holdK = true;
+        if (buffer == 'l' || buffer == 'L') result.triggerL = true;
+
+        FD_ZERO(&set);
+        FD_SET(STDIN_FILENO, &set);
+        tv = timeval{};
+    }
+#endif
+    return result;
+}
+
+pinocchio::SE3 WristToSE3(const WristPose& wrist) {
+    Eigen::Quaterniond quat(wrist.orientation.w, wrist.orientation.x, wrist.orientation.y, wrist.orientation.z);
+    quat.normalize();
+    return {quat.toRotationMatrix(), Eigen::Vector3d(wrist.position.x, wrist.position.y, wrist.position.z)};
+}
+
+class PinocchioIkSolver {
+public:
+    PinocchioIkSolver(const std::string& urdfPath, std::string endEffectorFrame, size_t dof)
+        : dof_(dof), endEffectorFrame_(std::move(endEffectorFrame)) {
+        if (!FileExists(urdfPath)) {
+            std::cerr << "[teleop] URDF not found at '" << urdfPath
+                      << "'. Provide --urdf with an absolute path or run the binary from the repo root." << std::endl;
+            return;
+        }
+
+        try {
+            pinocchio::urdf::buildModel(urdfPath, model_);
+            data_           = pinocchio::Data(model_);
+            frameId_        = model_.getFrameId(endEffectorFrame_);
+            neutralQ_       = Eigen::VectorXd::Zero(model_.nq);
+            lastSolutionQ_  = neutralQ_;
+            pinocchio::forwardKinematics(model_, data_, neutralQ_);
+            pinocchio::updateFramePlacements(model_, data_);
+            homePose_ = data_.oMf[frameId_];
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to construct Pinocchio model from '" << urdfPath << "': " << e.what() << "\\n";
+        }
+    }
+
+    size_t Dof() const { return dof_; }
+
+    bool IsReady() const { return model_.nq > 0 && frameId_ < model_.frames.size(); }
+
+    pinocchio::SE3 HomePose() const { return homePose_; }
+
+    std::vector<float> Solve(const pinocchio::SE3& target) {
+        if (!IsReady()) return std::vector<float>(dof_, 0.0f);
+
+        Eigen::VectorXd q = lastSolutionQ_.size() == model_.nq ? lastSolutionQ_ : neutralQ_;
+
+        static constexpr double damping    = 1e-4;
+        static constexpr int    maxIters   = 50;
+        static constexpr double tolerance  = 1e-4;
+
+        for (int iter = 0; iter < maxIters; ++iter) {
+            pinocchio::forwardKinematics(model_, data_, q);
+            pinocchio::updateFramePlacements(model_, data_);
+            const pinocchio::SE3& current = data_.oMf[frameId_];
+
+            pinocchio::SE3 errorSE3 = current.actInv(target);
+            Eigen::Matrix<double, 6, 1> error = pinocchio::log6(errorSE3).toVector();
+            if (error.norm() < tolerance) break;
+
+            Eigen::Matrix<double, 6, Eigen::Dynamic> J(6, model_.nv);
+            pinocchio::computeFrameJacobian(model_, data_, q, frameId_, pinocchio::LOCAL, J);
+
+            Eigen::Matrix<double, 6, 6> JJt = J * J.transpose();
+            JJt.diagonal().array() += damping;
+            Eigen::Matrix<double, Eigen::Dynamic, 1> dq = -J.transpose() * JJt.ldlt().solve(error);
+
+            q = pinocchio::integrate(model_, q, dq);
+        }
+
+        lastSolutionQ_ = q;
+
+        std::vector<float> result(dof_, 0.0f);
+        for (size_t i = 0; i < std::min(dof_, static_cast<size_t>(q.size())); ++i) {
+            result[i] = static_cast<float>(q[static_cast<long>(i)]);
+        }
+        return result;
+    }
+
+private:
+    size_t                dof_{0};
+    pinocchio::Model      model_{};
+    pinocchio::Data       data_{};
+    pinocchio::SE3        homePose_ = pinocchio::SE3::Identity();
+    pinocchio::FrameIndex frameId_{0};
+    std::string           endEffectorFrame_{};
+    Eigen::VectorXd       neutralQ_{};
+    Eigen::VectorXd       lastSolutionQ_{};
 };
 
 class JointCommandStreamer {
@@ -279,14 +460,39 @@ void PrintJointCommand(const JointCommand& cmd) {
     }
     std::cout << "\n";
 }
+
+struct CalibrationState {
+    pinocchio::SE3 offset = pinocchio::SE3::Identity();
+    bool           hasOffset{false};
+};
+
+bool RobotAtHome(const std::unordered_map<std::string, std::vector<float>>& lastCommands) {
+    static constexpr float kHomeTolerance = 1e-3f;
+    if (lastCommands.empty()) return false;
+    for (const auto& [_, joints] : lastCommands) {
+        for (float j : joints) {
+            if (std::fabs(j) > kHomeTolerance) return false;
+        }
+    }
+    return true;
+}
+
+std::vector<JointCommand> MakeHomeCommands(const std::vector<std::string>& sides, size_t dof) {
+    std::vector<JointCommand> commands;
+    for (const std::string& side : sides) {
+        commands.push_back({side, std::vector<float>(dof, 0.0f)});
+    }
+    return commands;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     const Options opts = ParseArgs(argc, argv);
 
-    std::cout << "\n=== Bimanual Teleop Stream (FastIK -> joint UDP) ===\n";
+    std::cout << "\n=== Bimanual Teleop Stream (Pinocchio IK -> joint UDP) ===\n";
     std::cout << "Server : " << opts.serverIp << ":" << opts.port << "\n";
     std::cout << "Expecting BVH in OPT coords with YXZ rotation order; output is MocapApi joint poses.\n\n";
+    std::cout << "Hold 'k' to stream IK commands. Press 'l' to home, then press 'l' again at home to capture a teleop offset.\n\n";
 
     JointCommandStreamer wristStreamer(opts.outIp, opts.outPort, "joint");
     JointCommandStreamer handStreamer(opts.outIp, opts.handPort, "hand");
@@ -325,14 +531,63 @@ int main(int argc, char** argv) {
     if (!client.Initialize()) return 1;
 
     TeleopMapping mapper;
-    FastIkSolver ikSolver(6);  // Fanuc arm has 6 joints
-    HandRetargeter handRetargeter;
-    size_t       frame          = 0;
-    bool         printedWaiting = false;
+    const std::string resolvedUrdf = ResolveUrdfPath(opts.urdfPath, argv[0]);
+    std::cout << "[teleop] Requested URDF: '" << opts.urdfPath << "'" << std::endl;
+    std::cout << "[teleop] Resolved URDF:  '" << resolvedUrdf << "'" << std::endl;
+    if (!FileExists(resolvedUrdf)) {
+        std::error_code ec{};
+        const std::string cwd = std::filesystem::current_path(ec).string();
+        std::cerr << "[teleop] URDF not found at '" << resolvedUrdf
+                  << "'. Verify --urdf points to a valid file relative to the repo root (urdf/...) or provide an absolute path." << std::endl;
+        std::cerr << "[teleop] CWD='" << cwd << "'";
+        const std::string exeDir = ExecutableDir();
+        if (!exeDir.empty()) std::cerr << ", exeDir='" << exeDir << "'";
+#ifdef PROJECT_SOURCE_DIR
+        std::cerr << ", PROJECT_SOURCE_DIR='" << PROJECT_SOURCE_DIR << "'";
+#endif
+        std::cerr << std::endl;
+    }
+
+    PinocchioIkSolver ikSolver(resolvedUrdf, opts.endEffectorFrame, 6);  // Fanuc arm has 6 joints
+    HandRetargeter    handRetargeter;
+    size_t            frame          = 0;
+    bool              printedWaiting = false;
+    std::unordered_map<std::string, CalibrationState> calibrationBySide;
+    std::unordered_map<std::string, std::vector<float>> lastJointCommands;
+    bool              homingMode  = false;
+    TerminalModeGuard _terminalGuard;
+    const pinocchio::SE3 robotHomePose = ikSolver.HomePose();
+
+    if (!ikSolver.IsReady()) {
+        std::cerr << "[teleop] Pinocchio model not ready; IK commands will remain zero." << std::endl;
+    }
+
+    auto sideEnabled = [&opts](const std::string& side) {
+        return std::find(opts.sides.begin(), opts.sides.end(), side) != opts.sides.end();
+    };
 
     while (true) {
         client.Poll();
         mapper.Update(client.LatestJoints());
+
+        const KeyPollResult keyState = PollKeys();
+        const bool          robotAtHome = RobotAtHome(lastJointCommands);
+
+        if (keyState.triggerL) {
+            if (!robotAtHome) {
+                homingMode = true;
+                std::cout << "[teleop] Homing robot to zero joints before calibration..." << std::endl;
+            } else {
+                for (const WristPose& wrist : mapper.WristPoses()) {
+                    if (!sideEnabled(wrist.side)) continue;
+                    const pinocchio::SE3 deviceHome   = WristToSE3(wrist);
+                    CalibrationState&    calibration  = calibrationBySide[wrist.side];
+                    calibration.offset                 = robotHomePose * deviceHome.inverse();
+                    calibration.hasOffset              = true;
+                    std::cout << "[teleop] Captured calibration offset for " << wrist.side << " wrist." << std::endl;
+                }
+            }
+        }
 
         if (mapper.WristPoses().empty()) {
             if (!printedWaiting) {
@@ -342,20 +597,26 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
-
         printedWaiting = false;
-        auto sideEnabled = [&opts](const std::string& side) {
-            return std::find(opts.sides.begin(), opts.sides.end(), side) != opts.sides.end();
-        };
 
         std::vector<JointCommand> commands;
         std::vector<JointCommand> handCommands;
-        commands.reserve(mapper.WristPoses().size());
-        handCommands.reserve(mapper.WristPoses().size());
-        for (const WristPose& wrist : mapper.WristPoses()) {
-            if (!sideEnabled(wrist.side)) continue;
-            commands.push_back({wrist.side, ikSolver.Solve(wrist)});
-            handCommands.push_back({wrist.side, handRetargeter.Retarget(mapper.ErgonomicAngles(), wrist.side)});
+
+        if (homingMode) {
+            commands = MakeHomeCommands(opts.sides, ikSolver.Dof());
+        } else if (keyState.holdK) {
+            commands.reserve(mapper.WristPoses().size());
+            handCommands.reserve(mapper.WristPoses().size());
+            for (const WristPose& wrist : mapper.WristPoses()) {
+                if (!sideEnabled(wrist.side)) continue;
+
+                const CalibrationState& calibration = calibrationBySide[wrist.side];
+                const pinocchio::SE3    target      = calibration.hasOffset
+                                                     ? calibration.offset * WristToSE3(wrist)
+                                                     : WristToSE3(wrist);
+                commands.push_back({wrist.side, ikSolver.Solve(target)});
+                handCommands.push_back({wrist.side, handRetargeter.Retarget(mapper.ErgonomicAngles(), wrist.side)});
+            }
         }
 
         // if (frame % 30 == 0) {
@@ -376,10 +637,18 @@ int main(int argc, char** argv) {
 
         if (opts.enableUdp && !commands.empty()) {
             wristStreamer.Send(commands, frame);
+            for (const JointCommand& cmd : commands) {
+                lastJointCommands[cmd.side] = cmd.joints;
+            }
         }
 
         if (opts.enableHandUdp && !handCommands.empty()) {
             handStreamer.Send(handCommands, frame);
+        }
+
+        if (homingMode && RobotAtHome(lastJointCommands)) {
+            homingMode = false;
+            std::cout << "[teleop] Homing complete; press 'l' again to capture calibration." << std::endl;
         }
 
         ++frame;

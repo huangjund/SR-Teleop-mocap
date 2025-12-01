@@ -2,6 +2,8 @@
   "name": "mocapapi",
   "version-string": "0.1.0",
   "dependencies": [
-    "glfw3"
+    "boost-filesystem",
+    "glfw3",
+    "pinocchio"
   ]
 }
