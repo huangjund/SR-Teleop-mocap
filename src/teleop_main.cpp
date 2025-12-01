@@ -122,13 +122,12 @@ std::string ResolveUrdfPath(const std::string& userPath, const char* argv0) {
         if (!candidate.empty() && fs::exists(candidate, ec)) {
             std::error_code canonEc{};
             const fs::path canonical = fs::weakly_canonical(candidate, canonEc);
-            return canonEc ? candidate.generic_string() : canonical.generic_string();
+            return canonEc ? candidate.string() : canonical.string();
         }
     }
 
-    // Fall back to the original user string, normalized for forward slashes to
-    // avoid Windows backslash issues in URDF parsers.
-    return userPathFs.generic_string();
+    // Fall back to the original user string if nothing else is found.
+    return userPath;
 }
 
 void PrintUsage(const char* exeName) {
