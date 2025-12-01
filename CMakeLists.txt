@@ -17,6 +17,7 @@ add_executable(mocap_teleop
 
 find_package(OpenGL REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
+find_package(pinocchio CONFIG REQUIRED)
 
 target_include_directories(mocap_demo PRIVATE
     ${CMAKE_SOURCE_DIR}/include
@@ -44,7 +45,10 @@ target_compile_features(mocap_demo PRIVATE cxx_std_17)
 
 target_link_libraries(mocap_teleop PRIVATE
     MocapApi
+    pinocchio::pinocchio
 )
+
+target_compile_definitions(mocap_teleop PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 if (WIN32)
     target_link_libraries(mocap_teleop PRIVATE Ws2_32)
