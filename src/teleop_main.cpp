@@ -552,8 +552,17 @@ int main(int argc, char** argv) {
     std::cout << "[teleop] Requested URDF: '" << opts.urdfPath << "'" << std::endl;
     std::cout << "[teleop] Resolved URDF:  '" << resolvedUrdf << "'" << std::endl;
     if (!FileExists(resolvedUrdf)) {
+        std::error_code ec{};
+        const std::string cwd = std::filesystem::current_path(ec).string();
         std::cerr << "[teleop] URDF not found at '" << resolvedUrdf
                   << "'. Verify --urdf points to a valid file relative to the repo root (urdf/...) or provide an absolute path." << std::endl;
+        std::cerr << "[teleop] CWD='" << cwd << "'";
+        const std::string exeDir = ExecutableDir(argv[0]);
+        if (!exeDir.empty()) std::cerr << ", exeDir='" << exeDir << "'";
+#ifdef PROJECT_SOURCE_DIR
+        std::cerr << ", PROJECT_SOURCE_DIR='" << PROJECT_SOURCE_DIR << "'";
+#endif
+        std::cerr << std::endl;
     }
 
     PinocchioIkSolver ikSolver(resolvedUrdf, opts.endEffectorFrame, 6);  // Fanuc arm has 6 joints
