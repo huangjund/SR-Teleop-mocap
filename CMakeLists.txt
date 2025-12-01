@@ -48,6 +48,8 @@ target_link_libraries(mocap_teleop PRIVATE
     pinocchio::pinocchio
 )
 
+target_compile_definitions(mocap_teleop PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 if (WIN32)
     target_link_libraries(mocap_teleop PRIVATE Ws2_32)
 endif()

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -55,16 +56,9 @@ struct Options {
 };
 
 bool FileExists(const std::string& path) {
-    std::ifstream f(path.c_str());
-    return f.good();
-}
-
-std::string JoinPath(const std::string& base, const std::string& relative) {
-    if (base.empty()) return relative;
-    const char last = base.back();
-    const bool hasSep = (last == '/' || last == '\\');
-    if (hasSep) return base + relative;
-    return base + '/' + relative;
+    if (path.empty()) return false;
+    std::error_code ec{};
+    return std::filesystem::exists(path, ec);
 }
 
 std::string ExecutableDir(const char* argv0) {
@@ -92,21 +86,46 @@ bool IsAbsolutePath(const std::string& path) {
 }
 
 std::string ResolveUrdfPath(const std::string& userPath, const char* argv0) {
-    std::vector<std::string> candidates;
-    candidates.push_back(userPath);
+    namespace fs = std::filesystem;
 
-    if (!IsAbsolutePath(userPath)) {
+    std::vector<fs::path> candidates;
+    const fs::path        userPathFs(userPath);
+
+    if (!userPath.empty()) {
+        candidates.push_back(userPathFs);
+    }
+
+    if (!userPathFs.is_absolute()) {
+        std::error_code ec{};
+        const fs::path cwd = fs::current_path(ec);
+        if (!cwd.empty()) candidates.push_back(cwd / userPathFs);
+
         const std::string exeDir = ExecutableDir(argv0);
         if (!exeDir.empty()) {
-            candidates.push_back(JoinPath(exeDir, userPath));
-            candidates.push_back(JoinPath(JoinPath(exeDir, ".."), userPath));
-            candidates.push_back(JoinPath(JoinPath(exeDir, "../.."), userPath));
+            const fs::path exePath(exeDir);
+            candidates.push_back(exePath / userPathFs);
+            candidates.push_back(exePath / ".." / userPathFs);
+            candidates.push_back(exePath / ".." / ".." / userPathFs);
+        }
+
+#ifdef PROJECT_SOURCE_DIR
+        const fs::path sourceDir(PROJECT_SOURCE_DIR);
+        if (!sourceDir.empty()) {
+            candidates.push_back(sourceDir / userPathFs);
+            candidates.push_back(sourceDir / ".." / userPathFs);
+        }
+#endif
+    }
+
+    for (const fs::path& candidate : candidates) {
+        std::error_code ec{};
+        if (!candidate.empty() && fs::exists(candidate, ec)) {
+            std::error_code canonEc{};
+            const fs::path canonical = fs::weakly_canonical(candidate, canonEc);
+            return canonEc ? candidate.string() : canonical.string();
         }
     }
 
-    for (const std::string& candidate : candidates) {
-        if (!candidate.empty() && FileExists(candidate)) return candidate;
-    }
     return userPath;
 }
 
@@ -247,6 +266,12 @@ class PinocchioIkSolver {
 public:
     PinocchioIkSolver(const std::string& urdfPath, std::string endEffectorFrame, size_t dof)
         : dof_(dof), endEffectorFrame_(std::move(endEffectorFrame)) {
+        if (!FileExists(urdfPath)) {
+            std::cerr << "[teleop] URDF not found at '" << urdfPath
+                      << "'. Provide --urdf with an absolute path or run the binary from the repo root." << std::endl;
+            return;
+        }
+
         try {
             pinocchio::urdf::buildModel(urdfPath, model_);
             data_           = pinocchio::Data(model_);
@@ -257,7 +282,7 @@ public:
             pinocchio::updateFramePlacements(model_, data_);
             homePose_ = data_.oMf[frameId_];
         } catch (const std::exception& e) {
-            std::cerr << "Failed to construct Pinocchio model: " << e.what() << "\\n";
+            std::cerr << "Failed to construct Pinocchio model from '" << urdfPath << "': " << e.what() << "\\n";
         }
     }
 
@@ -524,13 +549,11 @@ int main(int argc, char** argv) {
 
     TeleopMapping mapper;
     const std::string resolvedUrdf = ResolveUrdfPath(opts.urdfPath, argv[0]);
-    if (!resolvedUrdf.empty() && resolvedUrdf != opts.urdfPath) {
-        std::cout << "[teleop] Using resolved URDF path: " << resolvedUrdf << std::endl;
-    }
+    std::cout << "[teleop] Requested URDF: '" << opts.urdfPath << "'" << std::endl;
+    std::cout << "[teleop] Resolved URDF:  '" << resolvedUrdf << "'" << std::endl;
     if (!FileExists(resolvedUrdf)) {
         std::cerr << "[teleop] URDF not found at '" << resolvedUrdf
-                  << "'. Verify --urdf points to a valid file relative to the repo root (urdf/...) or provide an absolute path."
-                  << std::endl;
+                  << "'. Verify --urdf points to a valid file relative to the repo root (urdf/...) or provide an absolute path." << std::endl;
     }
 
     PinocchioIkSolver ikSolver(resolvedUrdf, opts.endEffectorFrame, 6);  // Fanuc arm has 6 joints
@@ -586,6 +609,23 @@ int main(int argc, char** argv) {
 
         std::vector<JointCommand> commands;
         std::vector<JointCommand> handCommands;
+
+        if (homingMode) {
+            commands = MakeHomeCommands(opts.sides, ikSolver.Dof());
+        } else if (keyState.holdK) {
+            commands.reserve(mapper.WristPoses().size());
+            handCommands.reserve(mapper.WristPoses().size());
+            for (const WristPose& wrist : mapper.WristPoses()) {
+                if (!sideEnabled(wrist.side)) continue;
+
+                const CalibrationState& calibration = calibrationBySide[wrist.side];
+                const pinocchio::SE3    target      = calibration.hasOffset
+                                                     ? calibration.offset * WristToSE3(wrist)
+                                                     : WristToSE3(wrist);
+                commands.push_back({wrist.side, ikSolver.Solve(target)});
+                handCommands.push_back({wrist.side, handRetargeter.Retarget(mapper.ErgonomicAngles(), wrist.side)});
+            }
+        }
 
         if (homingMode) {
             commands = MakeHomeCommands(opts.sides, ikSolver.Dof());
