@@ -479,6 +479,10 @@ int main(int argc, char** argv) {
         std::cerr << "[teleop] Pinocchio model not ready; IK commands will remain zero." << std::endl;
     }
 
+    auto sideEnabled = [&opts](const std::string& side) {
+        return std::find(opts.sides.begin(), opts.sides.end(), side) != opts.sides.end();
+    };
+
     while (true) {
         client.Poll();
         mapper.Update(client.LatestJoints());
@@ -510,11 +514,7 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
-
         printedWaiting = false;
-        auto sideEnabled = [&opts](const std::string& side) {
-            return std::find(opts.sides.begin(), opts.sides.end(), side) != opts.sides.end();
-        };
 
         std::vector<JointCommand> commands;
         std::vector<JointCommand> handCommands;
