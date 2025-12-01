@@ -536,22 +536,6 @@ int main(int argc, char** argv) {
             }
         }
 
-        // if (frame % 30 == 0) {
-        //     std::cout << "\nFrame " << frame << "\n";
-        //     for (const WristPose& wrist : mapper.WristPoses()) {
-        //         PrintWrist(wrist);
-        //     }
-        //     std::cout << "  IK solution (radians/meters)\n";
-        //     for (const JointCommand& cmd : commands) {
-        //         PrintJointCommand(cmd);
-        //     }
-        //     std::cout << "  Ergonomic hand joints (local YXZ -> flex/abduction/twist in deg):\n";
-        //     for (const ErgonomicJointAngles& angles : mapper.ErgonomicAngles()) {
-        //         PrintErgonomic(angles);
-        //     }
-        //     std::cout << std::flush;
-        // }
-
         if (opts.enableUdp && !commands.empty()) {
             wristStreamer.Send(commands, frame);
             for (const JointCommand& cmd : commands) {
