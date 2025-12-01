@@ -127,13 +127,17 @@ def _gather_targets(sliders: Dict[str, list[tk.Scale]]) -> Dict[str, pin.SE3]:
     return {side: _pose_from_sliders(scales) for side, scales in sliders.items()}
 
 
-def _format_packet(frame_idx: int, sides: Iterable[str], angles: Dict[str, Sequence[float]]) -> str:
+def _format_packet(frame_idx: int, sides: Iterable[str], angles_deg: Dict[str, Sequence[float]]) -> str:
     lines = [f"frame,{frame_idx}"]
     for side in sides:
-        joint_values = angles.get(side, [])
+        joint_values = angles_deg.get(side, [])
         formatted = ",".join(f"{value:.6f}" for value in joint_values)
         lines.append(f"joint,{side},{formatted}")
     return "\n".join(lines)
+
+
+def _to_degrees(angles_rad: Dict[str, Sequence[float]]) -> Dict[str, list[float]]:
+    return {side: [float(np.degrees(value)) for value in values] for side, values in angles_rad.items()}
 
 
 def stream_fake_cartesian(args: argparse.Namespace) -> None:
@@ -157,7 +161,7 @@ def stream_fake_cartesian(args: argparse.Namespace) -> None:
     )
 
     seeds = {side: pin.neutral(model) for side in args.sides}
-    last_commands: Dict[str, list[float]] = {side: seeds[side][:6].tolist() for side in args.sides}
+    last_commands_rad: Dict[str, list[float]] = {side: seeds[side][:6].tolist() for side in args.sides}
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     destination = (args.dest_ip, args.dest_port)
@@ -196,11 +200,11 @@ def stream_fake_cartesian(args: argparse.Namespace) -> None:
             )
             if converged:
                 seeds[side] = q_sol
-                last_commands[side] = q_sol[:6].tolist()
+                last_commands_rad[side] = q_sol[:6].tolist()
             else:
                 print(f"[WARN] IK failed to converge for {side} at frame {frame_idx}; sending last valid joints.")
 
-        payload = _format_packet(frame_idx, args.sides, last_commands)
+        payload = _format_packet(frame_idx, args.sides, _to_degrees(last_commands_rad))
         sock.sendto(payload.encode("utf-8"), destination)
 
         frame_idx += 1
