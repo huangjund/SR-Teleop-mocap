@@ -638,21 +638,22 @@ int main(int argc, char** argv) {
             }
         }
 
-        // if (frame % 30 == 0) {
-        //     std::cout << "\nFrame " << frame << "\n";
-        //     for (const WristPose& wrist : mapper.WristPoses()) {
-        //         PrintWrist(wrist);
-        //     }
-        //     std::cout << "  IK solution (radians/meters)\n";
-        //     for (const JointCommand& cmd : commands) {
-        //         PrintJointCommand(cmd);
-        //     }
-        //     std::cout << "  Ergonomic hand joints (local YXZ -> flex/abduction/twist in deg):\n";
-        //     for (const ErgonomicJointAngles& angles : mapper.ErgonomicAngles()) {
-        //         PrintErgonomic(angles);
-        //     }
-        //     std::cout << std::flush;
-        // }
+        if (homingMode) {
+            commands = MakeHomeCommands(opts.sides, ikSolver.Dof());
+        } else if (keyState.holdK) {
+            commands.reserve(mapper.WristPoses().size());
+            handCommands.reserve(mapper.WristPoses().size());
+            for (const WristPose& wrist : mapper.WristPoses()) {
+                if (!sideEnabled(wrist.side)) continue;
+
+                const CalibrationState& calibration = calibrationBySide[wrist.side];
+                const pinocchio::SE3    target      = calibration.hasOffset
+                                                     ? calibration.offset * WristToSE3(wrist)
+                                                     : WristToSE3(wrist);
+                commands.push_back({wrist.side, ikSolver.Solve(target)});
+                handCommands.push_back({wrist.side, handRetargeter.Retarget(mapper.ErgonomicAngles(), wrist.side)});
+            }
+        }
 
         if (opts.enableUdp && !commands.empty()) {
             wristStreamer.Send(commands, frame);
