@@ -35,6 +35,9 @@ else:
 import numpy as np
 import pinocchio as pin
 
+TRANSLATION_OFFSET = np.array([0, 0, 0]) # np.array([0.506, 0.01, 0.787])
+TRANSLATION_SCALE = 1 #0.01  # Convert cm to meters
+
 @dataclass
 class WristPose:
     translation: np.ndarray
@@ -113,7 +116,7 @@ def _parse_pose_packet(packet: bytes) -> ParsedPacket:
                 values = [float(value) for value in parts[2:9]]
             except ValueError:
                 continue
-            translation = np.array(values[:3], dtype=float)
+            translation = np.array(values[:3], dtype=float) * TRANSLATION_SCALE
             quaternion = _normalize_quaternion([values[3], values[4], values[5], values[6]])
             wrists[side] = WristPose(translation=translation, quaternion=quaternion)
         elif prefix == "hand":
@@ -326,9 +329,11 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                         if calibration and calibration.has_offset and calibration.offset is not None:
                             target = calibration.offset * target
 
+                        target.translation += TRANSLATION_OFFSET
+
                         target_translation, target_quat = _se3_to_components(target)
                         print(
-                            f"[wrist-ik] Target for {side} wrist — "
+                           f"[wrist-ik] Target for {side} wrist — "
                             f"xyz: {target_translation[0]:.4f}, {target_translation[1]:.4f}, {target_translation[2]:.4f}; "
                             f"quat[x y z w]: {target_quat[0]:.4f}, {target_quat[1]:.4f}, {target_quat[2]:.4f}, {target_quat[3]:.4f}"
                         )
