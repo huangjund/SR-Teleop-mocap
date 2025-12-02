@@ -231,7 +231,6 @@ def stream_fake_cartesian(args: argparse.Namespace) -> None:
 
         joint_payload = _format_packet(frame_idx, args.sides, _to_degrees(last_commands_rad))
         wrist_payload = _format_wrist_packet(frame_idx, args.sides, targets)
-        print(f"[Frame {frame_idx}] Sending wrist packet:\n{wrist_payload}")
         sock.sendto(joint_payload.encode("utf-8"), joint_destination)
         sock.sendto(wrist_payload.encode("utf-8"), wrist_destination)
 
