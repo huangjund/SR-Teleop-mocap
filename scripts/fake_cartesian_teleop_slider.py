@@ -1,10 +1,11 @@
-"""Interactive Cartesian slider that solves IK and streams joints over UDP.
+"""Interactive Cartesian slider that solves IK and streams joints and wrist poses.
 
 This tool complements ``scripts/fake_teleop_slider.py`` by letting you control
 an end-effector pose directly. The sliders define a 6D Cartesian target
 (x, y, z, roll, pitch, yaw) for the Fanuc wrist; each target is converted to
 joint angles with Pinocchio inverse kinematics and broadcast to the same UDP
-endpoint as the joint-space fake teleop.
+endpoint as the joint-space fake teleop while also sending wrist poses to
+``udp_wrist_to_ik.py``.
 """
 
 from __future__ import annotations
@@ -29,8 +30,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Send fake Cartesian teleop packets with IK")
     parser.add_argument("--urdf", type=Path, default=default_urdf, help="Path to the robot URDF")
     parser.add_argument("--frame", default="wrist", help="End-effector frame name for Cartesian control")
-    parser.add_argument("--dest-ip", default="127.0.0.1", help="Destination IP for the UDP joint stream")
+    parser.add_argument("--dest-ip", default="127.0.0.1", help="Destination IP for the UDP stream")
     parser.add_argument("--dest-port", type=int, default=15000, help="Destination UDP port for arm joints")
+    parser.add_argument(
+        "--wrist-port", type=int, default=16000, help="Destination UDP port for wrist pose packets"
+    )
     parser.add_argument("--rate-hz", type=float, default=30.0, help="Streaming rate in Hz")
     parser.add_argument(
         "--sides", nargs="+", choices=["left", "right"], default=["left", "right"], help="Arms to stream"
@@ -140,6 +144,26 @@ def _to_degrees(angles_rad: Dict[str, Sequence[float]]) -> Dict[str, list[float]
     return {side: [float(np.degrees(value)) for value in values] for side, values in angles_rad.items()}
 
 
+def _format_wrist_packet(frame_idx: int, sides: Iterable[str], poses: Dict[str, pin.SE3]) -> str:
+    """Create a UDP payload carrying wrist translations and quaternions."""
+
+    lines = [f"frame,{frame_idx}"]
+    for side in sides:
+        pose = poses.get(side)
+        if pose is None:
+            continue
+
+        translation = pose.translation
+        quat = pin.Quaternion(pose.rotation)
+        quat.normalize()
+        quaternion = (quat.x, quat.y, quat.z, quat.w)
+        values = [*translation, *quaternion]
+        formatted = ",".join(f"{value:.6f}" for value in values)
+        lines.append(f"wrist,{side},{formatted}")
+
+    return "\n".join(lines)
+
+
 def stream_fake_cartesian(args: argparse.Namespace) -> None:
     model = pin.buildModelFromUrdf(str(args.urdf))
     frame_id = model.getFrameId(args.frame)
@@ -164,12 +188,13 @@ def stream_fake_cartesian(args: argparse.Namespace) -> None:
     last_commands_rad: Dict[str, list[float]] = {side: seeds[side][:6].tolist() for side in args.sides}
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    destination = (args.dest_ip, args.dest_port)
+    joint_destination = (args.dest_ip, args.dest_port)
+    wrist_destination = (args.dest_ip, args.wrist_port)
 
     print(
         "Streaming fake Cartesian teleop packets to "
-        f"{args.dest_ip}:{args.dest_port} for sides: {', '.join(args.sides)}. "
-        "Close the window or press Ctrl+C to stop."
+        f"{args.dest_ip}:{args.dest_port} (joints) and {args.dest_ip}:{args.wrist_port} (wrist) "
+        f"for sides: {', '.join(args.sides)}. Close the window or press Ctrl+C to stop."
     )
 
     frame_idx = 0
@@ -204,8 +229,10 @@ def stream_fake_cartesian(args: argparse.Namespace) -> None:
             else:
                 print(f"[WARN] IK failed to converge for {side} at frame {frame_idx}; sending last valid joints.")
 
-        payload = _format_packet(frame_idx, args.sides, _to_degrees(last_commands_rad))
-        sock.sendto(payload.encode("utf-8"), destination)
+        joint_payload = _format_packet(frame_idx, args.sides, _to_degrees(last_commands_rad))
+        wrist_payload = _format_wrist_packet(frame_idx, args.sides, targets)
+        sock.sendto(joint_payload.encode("utf-8"), joint_destination)
+        sock.sendto(wrist_payload.encode("utf-8"), wrist_destination)
 
         frame_idx += 1
         if period_ms > 0:
