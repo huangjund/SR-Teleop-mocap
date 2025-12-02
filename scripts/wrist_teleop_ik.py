@@ -235,6 +235,15 @@ def _se3_from_wrist(pose: WristPose) -> pin.SE3:
     return pin.SE3(rotation, pose.translation)
 
 
+def _se3_to_components(pose: pin.SE3) -> tuple[np.ndarray, np.ndarray]:
+    """Return translation (m) and quaternion [x, y, z, w] for logging."""
+
+    translation = pose.translation
+    quat = pin.Quaternion(pose.rotation)
+    quat.normalize()
+    return translation, np.array([quat.x, quat.y, quat.z, quat.w])
+
+
 def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     urdf_path = args.urdf.resolve()
     if not urdf_path.exists():
@@ -316,6 +325,13 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                         calibration = calibrations.get(side)
                         if calibration and calibration.has_offset and calibration.offset is not None:
                             target = calibration.offset * target
+
+                        target_translation, target_quat = _se3_to_components(target)
+                        print(
+                            f"[wrist-ik] Target for {side} wrist — "
+                            f"xyz: {target_translation[0]:.4f}, {target_translation[1]:.4f}, {target_translation[2]:.4f}; "
+                            f"quat[x y z w]: {target_quat[0]:.4f}, {target_quat[1]:.4f}, {target_quat[2]:.4f}, {target_quat[3]:.4f}"
+                        )
 
                         q_sol, converged = _solve_ik(
                             model,
