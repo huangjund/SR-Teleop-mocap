@@ -352,7 +352,7 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                             arm_commands[side] = [float(np.degrees(value)) for value in q_sol[:6]]
                         else:
                             arm_commands[side] = last_commands.get(side, [0.0] * 6)
-                            print(f"[wrist-ik][WARN] IK failed for {side} at frame {frame_idx}; sending last valid command.")
+                            # print(f"[wrist-ik][WARN] IK failed for {side} at frame {frame_idx}; sending last valid command.")
 
                     for side, joints in latest_packet.hand_joints.items():
                         if side in args.sides:
