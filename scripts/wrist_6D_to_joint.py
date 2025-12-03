@@ -66,6 +66,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--tolerance", type=float, default=1e-4, help="IK convergence tolerance on SE(3) error")
     parser.add_argument("--damping", type=float, default=1e-3, help="Damping factor for pseudo-inverse")
     parser.add_argument("--rate-hz", type=float, default=60.0, help="Simulation loop rate in Hz")
+    parser.add_argument("--translation-scale", type=float, default=1.0, help="Scale factor for wrist translation")
+    parser.add_argument("--rotation-scale", type=float, default=1.0, help="Scale factor for wrist rotation")
     return parser.parse_args(argv)
 
 
@@ -177,23 +179,30 @@ def raw_terminal_mode() -> None:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
 
 
-def _poll_keys() -> bool:
+def _poll_keys() -> tuple[bool, bool]:
     hold_k = False
+    pressed_l = False
 
     if platform.system() == "Windows":
         while msvcrt.kbhit():
             ch = msvcrt.getwch()
-            if ch.lower() == "k":
+            lower = ch.lower()
+            if lower == "k":
                 hold_k = True
+            if lower == "l":
+                pressed_l = True
     else:
         rlist, _, _ = select.select([sys.stdin], [], [], 0)
         while rlist:
             ch = sys.stdin.read(1)
-            if ch.lower() == "k":
+            lower = ch.lower()
+            if lower == "k":
                 hold_k = True
+            if lower == "l":
+                pressed_l = True
             rlist, _, _ = select.select([sys.stdin], [], [], 0)
 
-    return hold_k
+    return hold_k, pressed_l
 
 
 def _hand_packet(frame_idx: int, sides: Iterable[str], joints: Dict[str, Sequence[float]]) -> str:
@@ -245,6 +254,13 @@ def _parse_joint_state_packet(packet: bytes) -> Dict[str, np.ndarray]:
     return joint_states
 
 
+def _scale_pose(pose: pin.SE3, translation_scale: float, rotation_scale: float) -> pin.SE3:
+    scaled_translation = pose.translation * translation_scale
+    rotation_vector = pin.log3(pose.rotation)
+    scaled_rotation = pin.exp3(rotation_vector * rotation_scale)
+    return pin.SE3(scaled_rotation, scaled_translation)
+
+
 def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     urdf_path = args.urdf.resolve()
     if not urdf_path.exists():
@@ -263,6 +279,7 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     neutral_pose = neutral_data.oMf[frame_id]
     neutral_translation, neutral_quat = _se3_to_components(neutral_pose)
     default_wrist = WristPose(translation=neutral_translation.copy(), quaternion=neutral_quat.copy())
+    robot_home_pose = _se3_from_wrist(default_wrist)
 
     print(
         "[wrist-ik] Default wrist pose from URDF neutral — "
@@ -295,14 +312,17 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     frame_idx = 0
     period_s = 1.0 / args.rate_hz if args.rate_hz > 0 else 0.0
 
-    latest_packet = ParsedPacket(
-        frame_idx=None, wrists={side: default_wrist for side in args.sides}, hand_joints={}
-    )
+    latest_packet = ParsedPacket(frame_idx=None, wrists={}, hand_joints={})
+    calibration_offset = pin.SE3.Identity()
+    calibrated = False
 
     with raw_terminal_mode():
         try:
             while True:
-                hold_k = _poll_keys()
+                hold_k, pressed_l = _poll_keys()
+
+                if not calibrated:
+                    hold_k = False
 
                 try:
                     state_packet, _ = joint_state_sock.recvfrom(4096)
@@ -319,24 +339,60 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                 except BlockingIOError:
                     pass
 
-                if hold_k:
-                    try:
+                try:
+                    while True:
                         packet, _ = sock.recvfrom(4096)
                         latest_packet = _parse_pose_packet(packet)
-                    except BlockingIOError:
-                        pass
+                except BlockingIOError:
+                    pass
+
+                if pressed_l:
+                    at_home = all(np.allclose(seeds[side][:6], 0.0, atol=1e-4) for side in args.sides)
+
+                    if not at_home:
+                        print("[wrist-ik] Homing all arms to zero pose via 'l' command.")
+                        zero_commands = {side: [0.0] * 6 for side in args.sides}
+                        payload = _format_joint_packet(frame_idx, zero_commands.keys(), zero_commands)
+                        arm_sender.sendto(payload.encode("utf-8"), dest)
+                        for side in args.sides:
+                            seeds[side][:6] = 0.0
+                            last_commands[side] = zero_commands[side]
+                        continue
+
+                    if not latest_packet.wrists:
+                        print("[wrist-ik][WARN] Cannot calibrate without a wrist pose packet.")
+                    else:
+                        _, wrist_pose = next(iter(latest_packet.wrists.items()))
+                        device_home = _se3_from_wrist(wrist_pose)
+                        device_translation, device_quat = _se3_to_components(device_home)
+                        calibration_offset = robot_home_pose * device_home.inverse()
+                        calibrated = True
+                        print(
+                            "[wrist-ik] Calibration complete."
+                            f" Device home xyz: {device_translation[0]:.4f}, {device_translation[1]:.4f}, {device_translation[2]:.4f};"
+                            f" quat[x y z w]: {device_quat[0]:.4f}, {device_quat[1]:.4f}, {device_quat[2]:.4f}, {device_quat[3]:.4f}"
+                        )
+                        print(
+                            "[wrist-ik] Computed offset applied to incoming poses; translation and rotation scales"
+                            f" set to {args.translation_scale} and {args.rotation_scale}."
+                        )
 
                 arm_commands: Dict[str, list[float]] = {}
                 hand_commands: Dict[str, list[float]] = {}
 
                 if hold_k and latest_packet.wrists:
-                    wrist_targets = latest_packet.wrists or {side: default_wrist for side in args.sides}
+                    wrist_targets = latest_packet.wrists
                     for side, pose in wrist_targets.items():
                         if side not in args.sides:
                             continue
 
                         seed = seeds[side]
-                        target = _se3_from_wrist(pose)
+                        device_pose = _se3_from_wrist(pose)
+                        transformed_pose = calibration_offset * device_pose
+                        scaled_pose = _scale_pose(
+                            transformed_pose, args.translation_scale, args.rotation_scale
+                        )
+                        target = scaled_pose
 
                         target_translation, target_quat = _se3_to_components(target)
                         print(
