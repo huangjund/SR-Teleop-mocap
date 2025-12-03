@@ -110,6 +110,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--right-base-xyz", type=float, nargs="*", default=(0.6, 0.3, 0.0), help="Right base position")
     parser.add_argument("--right-base-rpy", type=float, nargs="*", default=(0.0, 0.0, -1.57), help="Right base roll/pitch/yaw")
     parser.add_argument("--no-plane", action="store_true", help="Do not add a ground plane")
+    parser.add_argument("--state-dest-ip", default="127.0.0.1", help="IP to stream live joint states")
+    parser.add_argument("--state-dest-port", type=int, default=15002, help="UDP port to stream live joint states")
     return parser.parse_args(argv)
 
 
@@ -130,6 +132,15 @@ class ArmInstance:
     hand_joint_indices: list[int]
     arm_targets: list[float]
     hand_targets: list[float]
+
+
+def _format_joint_state_packet(frame_idx: int, sides: Iterable[str], arm_states: Dict[str, list[float]]) -> str:
+    lines = [f"frame,{frame_idx}"]
+    for side in sides:
+        values = arm_states.get(side, [])
+        formatted = ",".join(f"{value:.6f}" for value in values)
+        lines.append(f"joint_state,{side},{formatted}")
+    return "\n".join(lines)
 
 
 def _spawn_arm(side: str, urdf_path: Path, base_xyz: Sequence[float], base_rpy: Sequence[float], client: int) -> ArmInstance:
@@ -180,6 +191,9 @@ def visualize_stream(args: argparse.Namespace) -> None:
         hand_sock.setblocking(False)
         print(f"Listening for dexterous-hand joints on {args.listen_ip}:{args.listen_hand_port}")
 
+    state_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    state_dest = (args.state_dest_ip, args.state_dest_port)
+
     client = p.connect(p.GUI)
     try:
         p.resetSimulation(physicsClientId=client)
@@ -204,6 +218,8 @@ def visualize_stream(args: argparse.Namespace) -> None:
             f"Loaded {len(arms)} arm(s) from {urdf_path.name}. "
             "Waiting for joint datagrams... Close the window or press Ctrl+C to exit."
         )
+
+        state_frame_idx = 0
 
         while True:
             packets: list[tuple[bytes, bool]] = []
@@ -270,6 +286,15 @@ def visualize_stream(args: argparse.Namespace) -> None:
                         physicsClientId=client,
                     )
 
+            if arms:
+                arm_states: Dict[str, list[float]] = {}
+                for side, instance in arms.items():
+                    readings = [p.getJointState(instance.robot_id, j)[0] for j in instance.arm_joint_indices]
+                    arm_states[side] = [math.degrees(value) for value in readings]
+                state_packet = _format_joint_state_packet(state_frame_idx, arms.keys(), arm_states)
+                state_sender.sendto(state_packet.encode("utf-8"), state_dest)
+                state_frame_idx += 1
+
             p.stepSimulation(physicsClientId=client)
             time.sleep(1.0 / 240.0)
     except KeyboardInterrupt:
@@ -278,6 +303,7 @@ def visualize_stream(args: argparse.Namespace) -> None:
         sock.close()
         if hand_sock is not None:
             hand_sock.close()
+        state_sender.close()
         p.disconnect(physicsClientId=client)
 
 
