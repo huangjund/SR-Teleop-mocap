@@ -2,12 +2,16 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <cmath>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #ifdef _WIN32
 #    include <WinSock2.h>
@@ -237,6 +241,9 @@ int main(int argc, char** argv) {
         return std::find(opts.sides.begin(), opts.sides.end(), side) != opts.sides.end();
     };
 
+    const float              halfPi     = 3.14159265358979323846f * 0.5f;
+    const Eigen::Quaternionf rotationZ(Eigen::AngleAxisf(halfPi, Eigen::Vector3f::UnitZ()));
+
     while (true) {
         client.Poll();
         mapper.Update(client.LatestJoints());
@@ -254,7 +261,24 @@ int main(int argc, char** argv) {
         std::unordered_map<std::string, WristPose> wristsBySide;
         for (const WristPose& wrist : mapper.WristPoses()) {
             if (!sideEnabled(wrist.side)) continue;
-            wristsBySide[wrist.side] = wrist;
+            WristPose transformed = wrist;
+            const Eigen::Vector3f positionEigen(wrist.position.x, wrist.position.y, wrist.position.z);
+            const Eigen::Vector3f rotatedPosition = rotationZ * positionEigen;
+
+            const Eigen::Quaternionf currentOrientation(wrist.orientation.w,
+                                                        wrist.orientation.x,
+                                                        wrist.orientation.y,
+                                                        wrist.orientation.z);
+            const Eigen::Quaternionf rotatedOrientation = rotationZ * currentOrientation;
+
+            transformed.position.x     = rotatedPosition.x();
+            transformed.position.y     = rotatedPosition.y();
+            transformed.position.z     = rotatedPosition.z();
+            transformed.orientation.x  = rotatedOrientation.x();
+            transformed.orientation.y  = rotatedOrientation.y();
+            transformed.orientation.z  = rotatedOrientation.z();
+            transformed.orientation.w  = rotatedOrientation.w();
+            wristsBySide[wrist.side] = transformed;
         }
 
         std::unordered_map<std::string, std::vector<float>> handJointsBySide;
