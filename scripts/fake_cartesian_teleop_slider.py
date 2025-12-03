@@ -31,7 +31,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--urdf", type=Path, default=default_urdf, help="Path to the robot URDF")
     parser.add_argument("--frame", default="wrist", help="End-effector frame name for Cartesian control")
     parser.add_argument("--dest-ip", default="127.0.0.1", help="Destination IP for the UDP stream")
-    parser.add_argument("--dest-port", type=int, default=15002, help="Destination UDP port for arm joints")
+    parser.add_argument("--dest-port", type=int, default=15900, help="Destination UDP port for arm joints")
     parser.add_argument(
         "--wrist-port", type=int, default=16000, help="Destination UDP port for wrist pose packets"
     )
