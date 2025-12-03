@@ -313,15 +313,15 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     period_s = 1.0 / args.rate_hz if args.rate_hz > 0 else 0.0
 
     latest_packet = ParsedPacket(frame_idx=None, wrists={}, hand_joints={})
-    calibration_offset = pin.SE3.Identity()
-    calibrated = False
+    calibration_offsets: Dict[str, pin.SE3] = {side: pin.SE3.Identity() for side in args.sides}
+    calibrated_sides = {side: False for side in args.sides}
 
     with raw_terminal_mode():
         try:
             while True:
                 hold_k, pressed_l = _poll_keys()
 
-                if not calibrated:
+                if not any(calibrated_sides.values()):
                     hold_k = False
 
                 try:
@@ -362,20 +362,26 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                     if not latest_packet.wrists:
                         print("[wrist-ik][WARN] Cannot calibrate without a wrist pose packet.")
                     else:
-                        _, wrist_pose = next(iter(latest_packet.wrists.items()))
-                        device_home = _se3_from_wrist(wrist_pose)
-                        device_translation, device_quat = _se3_to_components(device_home)
-                        calibration_offset = robot_home_pose * device_home.inverse()
-                        calibrated = True
-                        print(
-                            "[wrist-ik] Calibration complete."
-                            f" Device home xyz: {device_translation[0]:.4f}, {device_translation[1]:.4f}, {device_translation[2]:.4f};"
-                            f" quat[x y z w]: {device_quat[0]:.4f}, {device_quat[1]:.4f}, {device_quat[2]:.4f}, {device_quat[3]:.4f}"
-                        )
-                        print(
-                            "[wrist-ik] Computed offset applied to incoming poses; translation and rotation scales"
-                            f" set to {args.translation_scale} and {args.rotation_scale}."
-                        )
+                        for side in args.sides:
+                            if side not in latest_packet.wrists:
+                                print(f"[wrist-ik][WARN] Missing wrist pose for {side}; skipping calibration for that side.")
+                                continue
+
+                            wrist_pose = latest_packet.wrists[side]
+                            device_home = _se3_from_wrist(wrist_pose)
+                            device_translation, device_quat = _se3_to_components(device_home)
+                            calibration_offsets[side] = robot_home_pose * device_home.inverse()
+                            calibrated_sides[side] = True
+                            print(
+                                f"[wrist-ik] Calibration complete for {side} arm."
+                                f" Device home xyz: {device_translation[0]:.4f}, {device_translation[1]:.4f}, {device_translation[2]:.4f};"
+                                f" quat[x y z w]: {device_quat[0]:.4f}, {device_quat[1]:.4f}, {device_quat[2]:.4f}, {device_quat[3]:.4f}"
+                            )
+                        if any(calibrated_sides.values()):
+                            print(
+                                "[wrist-ik] Computed per-arm offsets applied to incoming poses; translation and rotation scales"
+                                f" set to {args.translation_scale} and {args.rotation_scale}."
+                            )
 
                 arm_commands: Dict[str, list[float]] = {}
                 hand_commands: Dict[str, list[float]] = {}
@@ -386,9 +392,12 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                         if side not in args.sides:
                             continue
 
+                        if not calibrated_sides.get(side, False):
+                            continue
+
                         seed = seeds[side]
                         device_pose = _se3_from_wrist(pose)
-                        transformed_pose = calibration_offset * device_pose
+                        transformed_pose = calibration_offsets[side] * device_pose
                         scaled_pose = _scale_pose(
                             transformed_pose, args.translation_scale, args.rotation_scale
                         )
