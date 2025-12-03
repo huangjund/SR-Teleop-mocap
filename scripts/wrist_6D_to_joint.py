@@ -12,6 +12,7 @@ Keyboard controls (matching the C++ teleop pipeline):
 from __future__ import annotations
 
 import argparse
+import math
 import platform
 import select
 import socket
@@ -56,6 +57,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--dest-ip", default="127.0.0.1", help="Destination IP for joint UDP stream")
     parser.add_argument("--dest-port", type=int, default=15000, help="Destination UDP port for arm joints")
     parser.add_argument("--dest-hand-port", type=int, default=15001, help="Destination UDP port for dexterous-hand joints")
+    parser.add_argument("--state-ip", default="0.0.0.0", help="IP to bind for incoming joint-state packets")
+    parser.add_argument(
+        "--state-port", type=int, default=15002, help="UDP port for joint states broadcast by the Fanuc simulation"
+    )
     parser.add_argument("--sides", nargs="+", choices=["left", "right"], default=["left", "right"], help="Arms to drive")
     parser.add_argument("--max-iters", type=int, default=100, help="Max IK iterations per update")
     parser.add_argument("--tolerance", type=float, default=1e-4, help="IK convergence tolerance on SE(3) error")
@@ -102,7 +107,7 @@ def _parse_pose_packet(packet: bytes) -> ParsedPacket:
                 values = [float(value) for value in parts[2:9]]
             except ValueError:
                 continue
-            translation = np.array(values[:3], dtype=float)
+            translation = np.array(values[:3], dtype=float) * 0.01  # incoming unit is centimeters
             quaternion = _normalize_quaternion([values[3], values[4], values[5], values[6]])
             wrists[side] = WristPose(translation=translation, quaternion=quaternion)
         elif prefix == "hand":
@@ -216,6 +221,30 @@ def _se3_to_components(pose: pin.SE3) -> tuple[np.ndarray, np.ndarray]:
     return translation, np.array([quat.x, quat.y, quat.z, quat.w])
 
 
+def _parse_joint_state_packet(packet: bytes) -> Dict[str, np.ndarray]:
+    decoded = packet.decode("utf-8", errors="ignore")
+    lines = [line.strip() for line in decoded.splitlines() if line.strip()]
+
+    joint_states: Dict[str, np.ndarray] = {}
+    for line in lines:
+        parts = [part.strip() for part in line.split(",") if part.strip()]
+        if len(parts) < 3:
+            continue
+
+        prefix = parts[0].lower()
+        if prefix != "joint_state":
+            continue
+
+        side = parts[1].lower()
+        try:
+            angles = np.array([float(value) for value in parts[2:]], dtype=float)
+        except ValueError:
+            continue
+        joint_states[side] = angles
+
+    return joint_states
+
+
 def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     urdf_path = args.urdf.resolve()
     if not urdf_path.exists():
@@ -228,11 +257,28 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
         raise ValueError(f"Frame '{args.frame}' not found in model. Available frames: {available}")
 
     neutral_q = pin.neutral(model)
+    neutral_data = model.createData()
+    pin.forwardKinematics(model, neutral_data, neutral_q)
+    pin.updateFramePlacements(model, neutral_data)
+    neutral_pose = neutral_data.oMf[frame_id]
+    neutral_translation, neutral_quat = _se3_to_components(neutral_pose)
+    default_wrist = WristPose(translation=neutral_translation.copy(), quaternion=neutral_quat.copy())
+
+    print(
+        "[wrist-ik] Default wrist pose from URDF neutral — "
+        f"xyz: {neutral_translation[0]:.4f}, {neutral_translation[1]:.4f}, {neutral_translation[2]:.4f}; "
+        f"quat[x y z w]: {neutral_quat[0]:.4f}, {neutral_quat[1]:.4f}, {neutral_quat[2]:.4f}, {neutral_quat[3]:.4f}"
+    )
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((args.listen_ip, args.listen_port))
     sock.setblocking(False)
+
+    joint_state_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    joint_state_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    joint_state_sock.bind((args.state_ip, args.state_port))
+    joint_state_sock.setblocking(False)
 
     arm_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     hand_sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -249,12 +295,29 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     frame_idx = 0
     period_s = 1.0 / args.rate_hz if args.rate_hz > 0 else 0.0
 
-    latest_packet = ParsedPacket(frame_idx=None, wrists={}, hand_joints={})
+    latest_packet = ParsedPacket(
+        frame_idx=None, wrists={side: default_wrist for side in args.sides}, hand_joints={}
+    )
 
     with raw_terminal_mode():
         try:
             while True:
                 hold_k = _poll_keys()
+
+                try:
+                    state_packet, _ = joint_state_sock.recvfrom(4096)
+                    sim_states = _parse_joint_state_packet(state_packet)
+                    for side, angles_deg in sim_states.items():
+                        if side not in seeds:
+                            continue
+                        updated = neutral_q.copy()
+                        for idx, angle_deg in enumerate(angles_deg):
+                            if idx >= len(updated):
+                                break
+                            updated[idx] = math.radians(angle_deg)
+                        seeds[side] = updated
+                except BlockingIOError:
+                    pass
 
                 if hold_k:
                     try:
@@ -267,7 +330,8 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                 hand_commands: Dict[str, list[float]] = {}
 
                 if hold_k and latest_packet.wrists:
-                    for side, pose in latest_packet.wrists.items():
+                    wrist_targets = latest_packet.wrists or {side: default_wrist for side in args.sides}
+                    for side, pose in wrist_targets.items():
                         if side not in args.sides:
                             continue
 
@@ -316,6 +380,11 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                     time.sleep(period_s)
         except KeyboardInterrupt:
             print("\n[wrist-ik] Exiting wrist teleop IK streamer.")
+        finally:
+            sock.close()
+            joint_state_sock.close()
+            arm_sender.close()
+            hand_sender.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
