@@ -242,7 +242,10 @@ int main(int argc, char** argv) {
     };
 
     const float              halfPi     = 3.14159265358979323846f * 0.5f;
-    const Eigen::Quaternionf rotationZ(Eigen::AngleAxisf(halfPi, Eigen::Vector3f::UnitZ()));
+    const float              onePi     = 3.14159265358979323846f * 1.0f;
+    const Eigen::Quaternionf rotationZ(Eigen::AngleAxisf(onePi, Eigen::Vector3f::UnitZ()));
+    const Eigen::Quaternionf rotationZhalf(Eigen::AngleAxisf(halfPi, Eigen::Vector3f::UnitZ()));
+    const Eigen::Quaternionf rotationX(Eigen::AngleAxisf(halfPi, Eigen::Vector3f::UnitX()));
 
     while (true) {
         client.Poll();
@@ -263,13 +266,13 @@ int main(int argc, char** argv) {
             if (!sideEnabled(wrist.side)) continue;
             WristPose transformed = wrist;
             const Eigen::Vector3f positionEigen(wrist.position.x, wrist.position.y, wrist.position.z);
-            const Eigen::Vector3f rotatedPosition = rotationZ * positionEigen;
+            const Eigen::Vector3f rotatedPosition = rotationZhalf * rotationX * positionEigen;
 
             const Eigen::Quaternionf currentOrientation(wrist.orientation.w,
                                                         wrist.orientation.x,
                                                         wrist.orientation.y,
                                                         wrist.orientation.z);
-            const Eigen::Quaternionf rotatedOrientation = rotationZ * currentOrientation;
+            const Eigen::Quaternionf rotatedOrientation = rotationZhalf * rotationX * currentOrientation;
 
             transformed.position.x     = rotatedPosition.x();
             transformed.position.y     = rotatedPosition.y();

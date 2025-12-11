@@ -278,7 +278,7 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
     pin.updateFramePlacements(model, neutral_data)
     neutral_pose = neutral_data.oMf[frame_id]
     neutral_translation, neutral_quat = _se3_to_components(neutral_pose)
-    default_wrist = WristPose(translation=neutral_translation.copy(), quaternion=neutral_quat.copy())
+    default_wrist = WristPose(translation=neutral_translation.copy(), quaternion=np.array([0,0,0,1], dtype=float))
     robot_home_pose = _se3_from_wrist(default_wrist)
 
     print(
@@ -347,7 +347,7 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                     pass
 
                 if pressed_l:
-                    at_home = all(np.allclose(seeds[side][:6], 0.0, atol=1e-4) for side in args.sides)
+                    at_home = all(np.allclose(seeds[side][:6], 0.0, atol=1e-3) for side in args.sides)
 
                     if not at_home:
                         print("[wrist-ik] Homing all arms to zero pose via 'l' command.")

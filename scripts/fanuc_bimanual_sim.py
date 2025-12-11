@@ -105,10 +105,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=["left", "right"],
         help="Which arms to spawn and drive (default: both)",
     )
-    parser.add_argument("--left-base-xyz", type=float, nargs="*", default=(-0.6, 0.3, 0.0), help="Left base position")
-    parser.add_argument("--left-base-rpy", type=float, nargs="*", default=(0.0, 0.0, -1.57), help="Left base roll/pitch/yaw")
-    parser.add_argument("--right-base-xyz", type=float, nargs="*", default=(0.6, 0.3, 0.0), help="Right base position")
+    parser.add_argument("--right-base-xyz", type=float, nargs="*", default=(-0.3, 0.3, 0.0), help="Right base position")
     parser.add_argument("--right-base-rpy", type=float, nargs="*", default=(0.0, 0.0, -1.57), help="Right base roll/pitch/yaw")
+    parser.add_argument("--left-base-xyz", type=float, nargs="*", default=(0.3, 0.3, 0.0), help="Left base position")
+    parser.add_argument("--left-base-rpy", type=float, nargs="*", default=(0.0, 0.0, -1.57), help="Left base roll/pitch/yaw")
     parser.add_argument("--no-plane", action="store_true", help="Do not add a ground plane")
     parser.add_argument("--state-dest-ip", default="127.0.0.1", help="IP to stream live joint states")
     parser.add_argument("--state-dest-port", type=int, default=15002, help="UDP port to stream live joint states")
