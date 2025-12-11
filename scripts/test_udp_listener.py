@@ -17,6 +17,9 @@ import socket
 import sys
 from typing import Dict, Sequence
 
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+
 import pinocchio as pin
 
 
@@ -96,8 +99,71 @@ def _quat_to_euler(quaternion: Sequence[float]) -> tuple[float, float, float]:
     return float(roll), float(pitch), float(yaw)
 
 
+def _setup_plot():
+    plt.ion()
+    fig = plt.figure(figsize=(7, 7))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Z (m)")
+    ax.scatter([0], [0], [0], marker="^", color="black", label="base")
+
+    line_map = {}
+    for side, color in (("left", "tab:blue"), ("right", "tab:orange")):
+        (line,) = ax.plot([], [], [], marker="o", linestyle="-", color=color, label=f"{side} wrist")
+        line_map[side] = line
+
+    ax.legend(loc="upper left")
+    fig.tight_layout()
+    return fig, ax, line_map
+
+
+def _adjust_axes(ax, points: list[tuple[float, float, float]]) -> None:
+    if not points:
+        return
+
+    xs, ys, zs = zip(*points)
+    xs += (0.0,)
+    ys += (0.0,)
+    zs += (0.0,)
+
+    x_range = max(xs) - min(xs)
+    y_range = max(ys) - min(ys)
+    z_range = max(zs) - min(zs)
+    max_range = max(x_range, y_range, z_range, 0.1)
+
+    center_x = (max(xs) + min(xs)) / 2
+    center_y = (max(ys) + min(ys)) / 2
+    center_z = (max(zs) + min(zs)) / 2
+
+    pad = max_range / 2
+    ax.set_xlim(center_x - pad, center_x + pad)
+    ax.set_ylim(center_y - pad, center_y + pad)
+    ax.set_zlim(center_z - pad, center_z + pad)
+
+
+def _update_plot(ax, line_map: Dict[str, Line2D], wrist_traces: Dict[str, list[tuple[float, float, float]]]) -> None:
+    all_points: list[tuple[float, float, float]] = []
+    for side, line in line_map.items():
+        points = wrist_traces.get(side, [])
+        if points:
+            xs, ys, zs = zip(*points)
+            line.set_data(xs, ys)
+            line.set_3d_properties(zs)
+            all_points.extend(points)
+        else:
+            line.set_data([], [])
+            line.set_3d_properties([])
+
+    _adjust_axes(ax, all_points)
+    ax.figure.canvas.draw()
+    ax.figure.canvas.flush_events()
+
+
 def listen(args: argparse.Namespace) -> None:
     udp_sock = _bind_socket(args.listen_ip, args.listen_port)
+    fig, ax, line_map = _setup_plot()
+    wrist_traces: Dict[str, list[tuple[float, float, float]]] = {}
 
     print(f"Listening for wrist/hand UDP on {args.listen_ip}:{args.listen_port}")
     print("Press Ctrl+C to exit.\n")
@@ -122,6 +188,9 @@ def listen(args: argparse.Namespace) -> None:
                         quat = values[3:]
                         euler = _quat_to_euler(quat)
                         print(f"    {side}: {_format_angles([*pos, *euler])}")
+                        wrist_traces.setdefault(side, []).append(tuple(pos))
+
+                    _update_plot(ax, line_map, wrist_traces)
 
                 if hand_targets and not args.no_hand:
                     print("  Hand joints:")
@@ -134,6 +203,7 @@ def listen(args: argparse.Namespace) -> None:
         print("\nStopping UDP listener.")
     finally:
         udp_sock.close()
+        plt.close(fig)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
