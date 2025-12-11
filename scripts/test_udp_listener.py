@@ -17,6 +17,8 @@ import socket
 import sys
 from typing import Dict, Sequence
 
+import pinocchio as pin
+
 
 def _parse_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Dict[str, list[float]]]:
     """Decode a UDP datagram carrying wrist poses and hand joint angles.
@@ -27,7 +29,7 @@ def _parse_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Di
     decoded = packet.decode("utf-8", errors="ignore")
     lines = [line.strip() for line in decoded.splitlines() if line.strip()]
     if not lines:
-        return None, {}, {}, {}
+        return None, {}, {}
 
     frame_idx: int | None = None
     header = lines[0].split(",")
@@ -83,6 +85,17 @@ def _format_angles(angles: list[float]) -> str:
     return ", ".join(f"{angle:.3f}" for angle in angles)
 
 
+def _quat_to_euler(quaternion: Sequence[float]) -> tuple[float, float, float]:
+    """Convert a quaternion (x, y, z, w) to Euler roll, pitch, yaw (radians)."""
+
+    x, y, z, w = quaternion
+    eigen_quat = pin.Quaternion(w, x, y, z)
+    eigen_quat.normalize()
+    roll, pitch, yaw = pin.rpy.matrixToRpy(eigen_quat.matrix())
+
+    return float(roll), float(pitch), float(yaw)
+
+
 def listen(args: argparse.Namespace) -> None:
     udp_sock = _bind_socket(args.listen_ip, args.listen_port)
 
@@ -103,9 +116,12 @@ def listen(args: argparse.Namespace) -> None:
                 print(f"[{frame_label}] Received packet from {addr[0]}:{addr[1]}")
 
                 if wrist_poses:
-                    print("  Wrist poses (pos_x, pos_y, pos_z, quat_x, quat_y, quat_z, quat_w):")
+                    print("  Wrist poses (pos_x, pos_y, pos_z, roll, pitch, yaw):")
                     for side, values in sorted(wrist_poses.items()):
-                        print(f"    {side}: {_format_angles(values)}")
+                        pos = values[:3]
+                        quat = values[3:]
+                        euler = _quat_to_euler(quat)
+                        print(f"    {side}: {_format_angles([*pos, *euler])}")
 
                 if hand_targets and not args.no_hand:
                     print("  Hand joints:")
