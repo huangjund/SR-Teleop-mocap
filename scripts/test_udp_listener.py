@@ -32,6 +32,13 @@ except ModuleNotFoundError as exc:
         "matplotlib is required for real-time wrist visualization; please install it first"
     ) from exc
 
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "matplotlib is required for real-time wrist visualization; please install it first"
+    ) from exc
+
 
 def _parse_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Dict[str, list[float]]]:
     """Decode a UDP datagram carrying wrist poses and hand joint angles.
