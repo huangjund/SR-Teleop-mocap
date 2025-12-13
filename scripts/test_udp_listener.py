@@ -32,13 +32,6 @@ except ModuleNotFoundError as exc:
         "matplotlib is required for real-time wrist visualization; please install it first"
     ) from exc
 
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError as exc:
-    raise ModuleNotFoundError(
-        "matplotlib is required for real-time wrist visualization; please install it first"
-    ) from exc
-
 
 def _parse_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Dict[str, list[float]]]:
     """Decode a UDP datagram carrying wrist poses and hand joint angles.
@@ -252,10 +245,17 @@ class WristVisualizer:
                 all_positions = [p for hist in self._history.values() for p in hist]
                 if all_positions:
                     xs, ys, zs = zip(*all_positions)
-                    margin = 0.05
-                    ax.set_xlim(min(xs) - margin, max(xs) + margin)
-                    ax.set_ylim(min(ys) - margin, max(ys) + margin)
-                    ax.set_zlim(min(zs) - margin, max(zs) + margin)
+
+                    min_vals = np.array([min(xs), min(ys), min(zs)])
+                    max_vals = np.array([max(xs), max(ys), max(zs)])
+                    centers = (max_vals + min_vals) / 2.0
+
+                    span = max((max_vals - min_vals).max(), 1e-3)
+                    half_span = span / 2.0 + 0.05
+
+                    ax.set_xlim(centers[0] - half_span, centers[0] + half_span)
+                    ax.set_ylim(centers[1] - half_span, centers[1] + half_span)
+                    ax.set_zlim(centers[2] - half_span, centers[2] + half_span)
 
                 last_update = time.time()
 
