@@ -3,7 +3,8 @@
 Run alongside the C++ teleop sender to confirm that the streamed wrist
 poses and hand joint angles look correct. The script binds to the UDP
 port used by ``teleop_main`` and prints the decoded contents of each
-packet.
+packet. It also renders a simple 3D visualization of the left and right
+wrist frames so you can see trajectories update live.
 
 Example:
     python scripts/test_udp_listener.py --listen-ip 0.0.0.0 --listen-port 16000
@@ -12,12 +13,23 @@ Example:
 from __future__ import annotations
 
 import argparse
+import queue
 import select
 import socket
 import sys
+import threading
+import time
+from collections import deque
 from typing import Dict, Sequence
 
 import pinocchio as pin
+
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "matplotlib is required for real-time wrist visualization; please install it first"
+    ) from exc
 
 
 def _parse_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Dict[str, list[float]]]:
@@ -78,6 +90,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="UDP port carrying wrist poses and dexterous-hand joint angles",
     )
     parser.add_argument("--no-hand", action="store_true", help="Ignore dexterous-hand UDP packets")
+    parser.add_argument(
+        "--no-visualize",
+        action="store_true",
+        help="Disable the live wrist visualization window",
+    )
     return parser.parse_args(argv)
 
 
@@ -96,8 +113,126 @@ def _quat_to_euler(quaternion: Sequence[float]) -> tuple[float, float, float]:
     return float(roll), float(pitch), float(yaw)
 
 
+class WristVisualizer:
+    """Live 3D visualization of wrist positions in a background thread.
+
+    The visualizer runs its own matplotlib event loop so network packet
+    handling stays responsive. Only the newest pose is rendered to avoid
+    falling behind when packets arrive quickly.
+    """
+
+    def __init__(self, history_len: int = 400, idle_refresh_s: float = 0.05) -> None:
+        self.history_len = history_len
+        self.idle_refresh_s = idle_refresh_s
+
+        self._queue: "queue.SimpleQueue[tuple[int | None, Dict[str, list[float]]]]" = queue.SimpleQueue()
+        self._history: Dict[str, deque[tuple[float, float, float]]] = {
+            "left": deque(maxlen=history_len),
+            "right": deque(maxlen=history_len),
+        }
+        self._running = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        if self._running.is_set():
+            return
+        self._running.set()
+        self._thread.start()
+
+    def stop(self) -> None:
+        if not self._running.is_set():
+            return
+        self._running.clear()
+        self._thread.join(timeout=1.0)
+
+    def submit(self, wrist_poses: Dict[str, list[float]], frame_idx: int | None) -> None:
+        """Send the newest wrist poses to the renderer without blocking UDP I/O."""
+
+        if not self._running.is_set():
+            return
+
+        # Drop stale points if the UI lags to keep rendering real time.
+        try:
+            while self._queue.qsize() > 3:
+                self._queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        self._queue.put((frame_idx, wrist_poses))
+
+    def _run(self) -> None:
+        plt.ion()
+
+        fig = plt.figure("Teleop wrist poses (live)")
+        ax = fig.add_subplot(111, projection="3d")
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_zlabel("Z (m)")
+        ax.view_init(elev=25, azim=-65)
+        ax.set_box_aspect([1, 1, 1])
+
+        scatter = {
+            "left": ax.scatter([], [], [], color="tab:blue", label="Left wrist"),
+            "right": ax.scatter([], [], [], color="tab:orange", label="Right wrist"),
+        }
+        traces = {
+            "left": ax.plot([], [], [], color="tab:blue", alpha=0.6, linewidth=1.0)[0],
+            "right": ax.plot([], [], [], color="tab:orange", alpha=0.6, linewidth=1.0)[0],
+        }
+
+        frame_text = ax.text2D(0.02, 0.98, "Frame ?", transform=ax.transAxes)
+        ax.legend(loc="upper right")
+
+        last_update = time.time()
+
+        while self._running.is_set():
+            try:
+                frame_idx, wrist_poses = self._queue.get(timeout=self.idle_refresh_s)
+                while not self._queue.empty():
+                    frame_idx, wrist_poses = self._queue.get_nowait()
+            except queue.Empty:
+                frame_idx = None
+                wrist_poses = {}
+
+            if wrist_poses:
+                frame_text.set_text(f"Frame {frame_idx}" if frame_idx is not None else "Frame ?")
+
+                for side, pose in wrist_poses.items():
+                    position = tuple(pose[:3])
+                    self._history[side].append(position)
+
+                    xs, ys, zs = zip(*self._history[side])
+                    scatter[side]._offsets3d = ([position[0]], [position[1]], [position[2]])
+                    traces[side].set_data(xs, ys)
+                    traces[side].set_3d_properties(zs)
+
+                all_positions = [p for hist in self._history.values() for p in hist]
+                if all_positions:
+                    xs, ys, zs = zip(*all_positions)
+                    margin = 0.05
+                    ax.set_xlim(min(xs) - margin, max(xs) + margin)
+                    ax.set_ylim(min(ys) - margin, max(ys) + margin)
+                    ax.set_zlim(min(zs) - margin, max(zs) + margin)
+
+                last_update = time.time()
+
+            # Keep the UI responsive even when idle.
+            fig.canvas.draw_idle()
+            plt.pause(0.001)
+
+            # Avoid tight loop if nothing is arriving.
+            if time.time() - last_update > 1.0:
+                time.sleep(self.idle_refresh_s)
+
+        plt.close(fig)
+
+
 def listen(args: argparse.Namespace) -> None:
     udp_sock = _bind_socket(args.listen_ip, args.listen_port)
+
+    visualizer = None if args.no_visualize else WristVisualizer()
+    if visualizer:
+        visualizer.start()
 
     print(f"Listening for wrist/hand UDP on {args.listen_ip}:{args.listen_port}")
     print("Press Ctrl+C to exit.\n")
@@ -130,9 +265,14 @@ def listen(args: argparse.Namespace) -> None:
 
                 if not wrist_poses and not hand_targets:
                     print("  (No wrist or hand lines decoded)")
+
+                if visualizer and wrist_poses:
+                    visualizer.submit(wrist_poses, frame_idx)
     except KeyboardInterrupt:
         print("\nStopping UDP listener.")
     finally:
+        if visualizer:
+            visualizer.stop()
         udp_sock.close()
 
 
