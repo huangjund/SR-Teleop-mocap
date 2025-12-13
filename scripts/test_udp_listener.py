@@ -4,7 +4,7 @@ Run alongside the C++ teleop sender to confirm that the streamed wrist
 poses and hand joint angles look correct. The script binds to the UDP
 port used by ``teleop_main`` and prints the decoded contents of each
 packet. It also renders a simple 3D visualization of the left and right
-wrist frames so you can see trajectories update live.
+wrist frames (with xyz axes) so you can see trajectories update live.
 
 Example:
     python scripts/test_udp_listener.py --listen-ip 0.0.0.0 --listen-port 16000
@@ -23,6 +23,14 @@ from collections import deque
 from typing import Dict, Sequence
 
 import pinocchio as pin
+import numpy as np
+
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "matplotlib is required for real-time wrist visualization; please install it first"
+    ) from exc
 
 try:
     import matplotlib.pyplot as plt
@@ -121,9 +129,15 @@ class WristVisualizer:
     falling behind when packets arrive quickly.
     """
 
-    def __init__(self, history_len: int = 400, idle_refresh_s: float = 0.05) -> None:
+    def __init__(
+        self,
+        history_len: int = 400,
+        idle_refresh_s: float = 0.05,
+        axis_length: float = 0.08,
+    ) -> None:
         self.history_len = history_len
         self.idle_refresh_s = idle_refresh_s
+        self.axis_length = axis_length
 
         self._queue: "queue.SimpleQueue[tuple[int | None, Dict[str, list[float]]]]" = queue.SimpleQueue()
         self._history: Dict[str, deque[tuple[float, float, float]]] = {
@@ -179,6 +193,18 @@ class WristVisualizer:
             "left": ax.plot([], [], [], color="tab:blue", alpha=0.6, linewidth=1.0)[0],
             "right": ax.plot([], [], [], color="tab:orange", alpha=0.6, linewidth=1.0)[0],
         }
+        axes_lines: dict[str, list] = {
+            "left": [
+                ax.plot([], [], [], color="red", linewidth=2.0)[0],
+                ax.plot([], [], [], color="green", linewidth=2.0)[0],
+                ax.plot([], [], [], color="blue", linewidth=2.0)[0],
+            ],
+            "right": [
+                ax.plot([], [], [], color="red", linewidth=2.0)[0],
+                ax.plot([], [], [], color="green", linewidth=2.0)[0],
+                ax.plot([], [], [], color="blue", linewidth=2.0)[0],
+            ],
+        }
 
         frame_text = ax.text2D(0.02, 0.98, "Frame ?", transform=ax.transAxes)
         ax.legend(loc="upper right")
@@ -198,13 +224,30 @@ class WristVisualizer:
                 frame_text.set_text(f"Frame {frame_idx}" if frame_idx is not None else "Frame ?")
 
                 for side, pose in wrist_poses.items():
+                    if len(pose) < 7:
+                        continue
+
                     position = tuple(pose[:3])
+                    quaternion = pose[3:]
+
+                    try:
+                        rotation = pin.Quaternion(quaternion[3], *quaternion[:3]).matrix()
+                    except (RuntimeError, ValueError):
+                        rotation = np.eye(3)
+
                     self._history[side].append(position)
 
                     xs, ys, zs = zip(*self._history[side])
                     scatter[side]._offsets3d = ([position[0]], [position[1]], [position[2]])
                     traces[side].set_data(xs, ys)
                     traces[side].set_3d_properties(zs)
+
+                    for axis_idx, line in enumerate(axes_lines[side]):
+                        direction = rotation[:, axis_idx]
+                        end = position[0] + direction[0] * self.axis_length, position[1] + direction[1] * self.axis_length, position[2] + direction[2] * self.axis_length
+
+                        line.set_data([position[0], end[0]], [position[1], end[1]])
+                        line.set_3d_properties([position[2], end[2]])
 
                 all_positions = [p for hist in self._history.values() for p in hist]
                 if all_positions:
