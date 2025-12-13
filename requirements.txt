@@ -1,3 +1,4 @@
 pybullet>=3.2.5
 pin>=2.6.21
 numpy>=1.26
+matplotlib>=3.8
