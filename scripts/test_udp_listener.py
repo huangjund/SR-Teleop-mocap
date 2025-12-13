@@ -3,7 +3,8 @@
 Run alongside the C++ teleop sender to confirm that the streamed wrist
 poses and hand joint angles look correct. The script binds to the UDP
 port used by ``teleop_main`` and prints the decoded contents of each
-packet.
+packet. It also renders a simple 3D visualization of the left and right
+wrist frames so you can see trajectories update live.
 
 Example:
     python scripts/test_udp_listener.py --listen-ip 0.0.0.0 --listen-port 16000
@@ -18,6 +19,13 @@ import sys
 from typing import Dict, Sequence
 
 import pinocchio as pin
+
+try:
+    import matplotlib.pyplot as plt
+except ModuleNotFoundError as exc:
+    raise ModuleNotFoundError(
+        "matplotlib is required for real-time wrist visualization; please install it first"
+    ) from exc
 
 
 def _parse_packet(packet: bytes) -> tuple[int | None, Dict[str, list[float]], Dict[str, list[float]]]:
@@ -78,6 +86,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="UDP port carrying wrist poses and dexterous-hand joint angles",
     )
     parser.add_argument("--no-hand", action="store_true", help="Ignore dexterous-hand UDP packets")
+    parser.add_argument(
+        "--no-visualize",
+        action="store_true",
+        help="Disable the live wrist visualization window",
+    )
     return parser.parse_args(argv)
 
 
@@ -96,8 +109,59 @@ def _quat_to_euler(quaternion: Sequence[float]) -> tuple[float, float, float]:
     return float(roll), float(pitch), float(yaw)
 
 
+class WristVisualizer:
+    """Live 3D visualization of wrist positions."""
+
+    def __init__(self) -> None:
+        plt.ion()
+
+        self.fig = plt.figure("Teleop wrist poses")
+        self.ax = self.fig.add_subplot(111, projection="3d")
+        self.ax.set_xlabel("X (m)")
+        self.ax.set_ylabel("Y (m)")
+        self.ax.set_zlabel("Z (m)")
+        self.ax.view_init(elev=25, azim=-65)
+        self.ax.set_box_aspect([1, 1, 1])
+
+        self.scatter = {}
+        self.traces = {}
+        self.history: Dict[str, list[tuple[float, float, float]]] = {}
+
+        for side, color in {"left": "tab:blue", "right": "tab:orange"}.items():
+            self.history[side] = []
+            self.scatter[side] = self.ax.scatter([], [], [], color=color, label=f"{side.title()} wrist")
+            (self.traces[side],) = self.ax.plot([], [], [], color=color, alpha=0.5, linewidth=1.0)
+
+        self.frame_text = self.ax.text2D(0.02, 0.98, "Frame ?", transform=self.ax.transAxes)
+        self.ax.legend(loc="upper right")
+
+    def update(self, wrist_poses: Dict[str, list[float]], frame_idx: int | None) -> None:
+        self.frame_text.set_text(f"Frame {frame_idx}" if frame_idx is not None else "Frame ?")
+
+        for side, pose in wrist_poses.items():
+            position = tuple(pose[:3])
+            history = self.history.setdefault(side, [])
+            history.append(position)
+            if len(history) > 200:
+                history.pop(0)
+
+            xs, ys, zs = zip(*history)
+            self.scatter.setdefault(side, self.ax.scatter([], [], []))
+            self.traces.setdefault(side, self.ax.plot([], [], [])[0])
+
+            self.scatter[side]._offsets3d = ([position[0]], [position[1]], [position[2]])
+            self.traces[side].set_data(xs, ys)
+            self.traces[side].set_3d_properties(zs)
+
+        self.ax.relim()
+        self.ax.autoscale_view()
+        plt.pause(0.001)
+
+
 def listen(args: argparse.Namespace) -> None:
     udp_sock = _bind_socket(args.listen_ip, args.listen_port)
+
+    visualizer = None if args.no_visualize else WristVisualizer()
 
     print(f"Listening for wrist/hand UDP on {args.listen_ip}:{args.listen_port}")
     print("Press Ctrl+C to exit.\n")
@@ -130,6 +194,9 @@ def listen(args: argparse.Namespace) -> None:
 
                 if not wrist_poses and not hand_targets:
                     print("  (No wrist or hand lines decoded)")
+
+                if visualizer and wrist_poses:
+                    visualizer.update(wrist_poses, frame_idx)
     except KeyboardInterrupt:
         print("\nStopping UDP listener.")
     finally:
