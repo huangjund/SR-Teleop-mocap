@@ -281,7 +281,7 @@ int main(int argc, char** argv) {
             transformed.orientation.y  = rotatedOrientation.y();
             transformed.orientation.z  = rotatedOrientation.z();
             transformed.orientation.w  = rotatedOrientation.w();
-            wristsBySide[wrist.side] = wrist;//transformed;
+            wristsBySide[wrist.side] = transformed;
         }
 
         std::unordered_map<std::string, std::vector<float>> handJointsBySide;

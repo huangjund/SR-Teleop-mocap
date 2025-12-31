@@ -158,3 +158,8 @@ Useful flags:
 ## Skeleton scaling and body-length data
 
 You do **not** need to supply custom body-length parameters when pulling the MocapApi skeleton. Each avatar already carries the segment lengths through the joints' default local positions and bind pose that you can query from `IMCPJoint`/`IMCPBodyPart`. If you want to inspect or log those values, fetch the joint list from `IMCPAvatar`, then read the default local positions for each handle (e.g., via `GetJointDefaultLocalPosition`) to derive per-bone lengths; the BVH stream viewer already captures these local positions when it builds `JointSample` structures.
+
+# Fast Start
+1. cmake and build the folder
+2. run the mocap_teleop (runable program)
+3. run python script for simulation, hand skeleton and so on.

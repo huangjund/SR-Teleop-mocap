@@ -370,9 +370,7 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
                             wrist_pose = latest_packet.wrists[side]
                             device_home = _se3_from_wrist(wrist_pose)
                             device_translation, device_quat = _se3_to_components(device_home)
-                            Tb0_d0 = robot_home_pose.inverse() * device_home
-                            Q = Tb0_d0.inverse()
-                            calibration_offsets[side] = Q
+                            calibration_offsets[side] = device_home
                             calibrated_sides[side] = True
                             print(
                                 f"[wrist-ik] Calibration complete for {side} arm."
@@ -399,7 +397,12 @@ def stream_wrist_to_ik(args: argparse.Namespace) -> None:
 
                         seed = seeds[side]
                         device_pose = _se3_from_wrist(pose)
-                        transformed_pose = device_pose * calibration_offsets[side]
+                        Rd0_a=calibration_offsets[side].rotation.T
+                        Td0_aa=pin.SE3(Rd0_a, np.array([0.0,0.0,0.0], dtype=float))
+                        Td0_d = calibration_offsets[side].inverse()* device_pose
+                        Taa_in_d = Td0_aa * Td0_d * Td0_aa.inverse()
+                        p_robot_home= robot_home_pose.translation
+                        transformed_pose = pin.SE3(Taa_in_d.rotation, p_robot_home+Taa_in_d.translation)
                         scaled_pose = _scale_pose(
                             transformed_pose, args.translation_scale, args.rotation_scale
                         )

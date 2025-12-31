@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 project(MocapApiCppDemo LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(mocap_demo
     src/main.cpp
@@ -10,6 +12,13 @@ add_executable(mocap_demo
 
 add_executable(mocap_teleop
     src/teleop_main.cpp
+    src/MocapClient.cpp
+    src/JointData.cpp
+    src/TeleopMapping.cpp
+)
+
+add_executable(mocap_hands_udp_sender
+    src/main_hands_udp_sender.cpp
     src/MocapClient.cpp
     src/JointData.cpp
     src/TeleopMapping.cpp
@@ -27,11 +36,19 @@ target_include_directories(mocap_teleop PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
+target_include_directories(mocap_hands_udp_sender PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+)
+
 target_link_directories(mocap_demo PRIVATE
     ${CMAKE_SOURCE_DIR}/lib/win32/x64
 )
 
 target_link_directories(mocap_teleop PRIVATE
+    ${CMAKE_SOURCE_DIR}/lib/win32/x64
+)
+
+target_link_directories(mocap_hands_udp_sender PRIVATE
     ${CMAKE_SOURCE_DIR}/lib/win32/x64
 )
 
@@ -48,10 +65,19 @@ target_link_libraries(mocap_teleop PRIVATE
     Eigen3::Eigen
 )
 
+target_link_libraries(mocap_hands_udp_sender PRIVATE
+    MocapApi
+    Eigen3::Eigen
+)
+
 target_compile_definitions(mocap_teleop PRIVATE PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 if (WIN32)
     target_link_libraries(mocap_teleop PRIVATE Ws2_32)
+endif()
+
+if (WIN32)
+    target_link_libraries(mocap_hands_udp_sender PRIVATE Ws2_32)
 endif()
 
 target_compile_features(mocap_teleop PRIVATE cxx_std_17)

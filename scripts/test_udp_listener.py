@@ -126,7 +126,7 @@ class WristVisualizer:
         self,
         history_len: int = 400,
         idle_refresh_s: float = 0.05,
-        axis_length: float = 0.08,
+        axis_length: float = 10,
     ) -> None:
         self.history_len = history_len
         self.idle_refresh_s = idle_refresh_s
