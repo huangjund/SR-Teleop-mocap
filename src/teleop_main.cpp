@@ -30,8 +30,8 @@ namespace {
 struct Options {
     std::string              serverIp = "127.0.0.1";
     uint16_t                 port     = 7012;
-    std::string              outIp    = "127.0.0.1";
-    uint16_t                 outPort  = 16000;
+    std::string              outIp    = "10.42.0.100";
+    uint16_t                 outPort  = 16001;
     bool                     enableUdp{true};
     std::vector<std::string> sides{"left", "right"};
 };
